@@ -1,0 +1,6 @@
+{
+  "name": "PredictScore",
+  "description": "A live real-time dashboard displaying fixtures and scores for the 2026 FIFA Men's World Cup, updating instantly via webhook integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
