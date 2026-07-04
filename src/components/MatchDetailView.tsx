@@ -206,7 +206,7 @@ export default function MatchDetailView({
                         return (
                           <div key={idx} className="grid grid-cols-12 gap-2 items-center py-2.5 px-3 rounded-xl border border-transparent" style={style}>
                             <div className="col-span-5 flex justify-start">
-                              {evt.team_side === 'away' && (
+                              {evt.team_side === 'home' && (
                                 <div className="text-left">
                                   <span className="text-sm font-semibold text-brand-text-primary">{evt.player_name}</span>
                                   {evt.assist_player && <div className="text-xs text-brand-text-secondary">Assist: {evt.assist_player}</div>}
@@ -222,7 +222,7 @@ export default function MatchDetailView({
                               {evt.icon && <span className="text-xs z-10 mt-1 flex items-center justify-center w-6 h-6 rounded-full bg-brand-surface border border-brand-border">{evt.icon}</span>}
                             </div>
                             <div className="col-span-5 flex justify-end">
-                              {evt.team_side === 'home' && (
+                              {evt.team_side === 'away' && (
                                 <div className="text-right">
                                   <span className="text-sm font-semibold text-brand-text-primary">{evt.player_name}</span>
                                   {evt.assist_player && <div className="text-xs text-brand-text-secondary">Assist: {evt.assist_player}</div>}

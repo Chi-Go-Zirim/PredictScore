@@ -17,7 +17,7 @@ import { motion, AnimatePresence } from "motion/react";
 import MatchDetailView from "./components/MatchDetailView";
 import HeroSlideshow from "./components/HeroSlideshow";
 // @ts-ignore
-import predictScoreLogo from "./assets/images/predictscore_logo_dark_1782379627438.jpg";
+import predictScoreLogo from "./assets/images/ChatGPT_Image_Jun_25__2026__10_15_38_AM-removebg-preview.png";
 // @ts-ignore
 import worldCupHeroBanner from "./assets/images/ChatGPT Image Jun 25, 2026, 11_35_26 AM.png";
 
@@ -3295,9 +3295,9 @@ export default function App() {
 
                                     return (
                                       <div key={idx} className="grid grid-cols-12 gap-2 items-center py-2.5 px-3 rounded-xl transition" style={bgStyle}>
-                                        {/* Left Side: Away Team Side (team_side === 'away') */}
+                                        {/* Left Side: Home Team Side (team_side === 'home') */}
                                         <div className="col-span-5 flex justify-start">
-                                          {evt.team_side === 'away' ? (
+                                          {evt.team_side === 'home' ? (
                                             <div className="text-left">
                                               <span className="text-sm font-semibold text-brand-text-primary">
                                                 {evt.player_name}
@@ -3359,9 +3359,9 @@ export default function App() {
                                           )}
                                         </div>
 
-                                        {/* Right Side: Home Team Side (team_side === 'home') */}
+                                        {/* Right Side: Away Team Side (team_side === 'away') */}
                                         <div className="col-span-5 flex justify-end">
-                                          {evt.team_side === 'home' ? (
+                                          {evt.team_side === 'away' ? (
                                             <div className="text-right">
                                               <span className="text-sm font-semibold text-brand-text-primary">
                                                 {evt.player_name}
