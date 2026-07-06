@@ -426,6 +426,111 @@ function getFallbackResults() {
   ];
 }
 
+function getFallbackFixtures() {
+  return [
+    {
+      id: "match-1",
+      homeTeam: "United States",
+      homeTeamCode: "USA",
+      homeTeamFlag: "🇺🇸",
+      awayTeam: "Germany",
+      awayTeamCode: "GER",
+      awayTeamFlag: "🇩🇪",
+      homeScore: 2,
+      awayScore: 1,
+      status: "FINISHED",
+      minute: 90,
+      group: "Group A",
+      stadium: "MetLife Stadium, East Rutherford",
+      date: "2026-06-24",
+      time: "15:00",
+      stage: "Group Stage",
+      events: [
+        { type: "goal", team: "USA", player: "Christian Pulisic", minute: 14 },
+        { type: "card", team: "GER", player: "Antonio Rüdiger", minute: 42, detail: "Yellow Card" },
+        { type: "goal", team: "GER", player: "Kai Havertz", minute: 55 },
+        { type: "goal", team: "USA", player: "Folarin Balogun", minute: 82 }
+      ]
+    },
+    {
+      id: "match-2",
+      homeTeam: "Japan",
+      homeTeamCode: "JPN",
+      homeTeamFlag: "🇯🇵",
+      awayTeam: "Mexico",
+      awayTeamCode: "MEX",
+      awayTeamFlag: "🇲🇽",
+      homeScore: 1,
+      awayScore: 1,
+      status: "LIVE",
+      minute: 64,
+      group: "Group A",
+      stadium: "SoFi Stadium, Los Angeles",
+      date: "2026-06-24",
+      time: "18:00",
+      stage: "Group Stage",
+      events: [
+        { type: "goal", team: "MEX", player: "Santiago Giménez", minute: 28 },
+        { type: "goal", team: "JPN", player: "Kaoru Mitoma", minute: 49 }
+      ]
+    },
+    {
+      id: "match-3",
+      homeTeam: "Canada",
+      homeTeamCode: "CAN",
+      homeTeamFlag: "🇨🇦",
+      awayTeam: "Italy",
+      awayTeamCode: "ITA",
+      awayTeamFlag: "🇮🇹",
+      homeScore: 0,
+      awayScore: 0,
+      status: "UPCOMING",
+      group: "Group B",
+      stadium: "BC Place, Vancouver",
+      date: "2026-06-25",
+      time: "17:00",
+      stage: "Group Stage",
+      events: []
+    },
+    {
+      id: "match-4",
+      homeTeam: "Spain",
+      homeTeamCode: "ESP",
+      homeTeamFlag: "🇪🇸",
+      awayTeam: "Brazil",
+      awayTeamCode: "BRA",
+      awayTeamFlag: "🇧🇷",
+      homeScore: 0,
+      awayScore: 0,
+      status: "UPCOMING",
+      group: "Group B",
+      stadium: "Hard Rock Stadium, Miami",
+      date: "2026-06-25",
+      time: "20:00",
+      stage: "Group Stage",
+      events: []
+    },
+    {
+      id: "match-5",
+      homeTeam: "France",
+      homeTeamCode: "FRA",
+      homeTeamFlag: "🇫🇷",
+      awayTeam: "Argentina",
+      awayTeamCode: "ARG",
+      awayTeamFlag: "🇦🇷",
+      homeScore: 0,
+      awayScore: 0,
+      status: "UPCOMING",
+      group: "Group C",
+      stadium: "Mercedes-Benz Stadium, Atlanta",
+      date: "2026-06-26",
+      time: "19:00",
+      stage: "Group Stage",
+      events: []
+    }
+  ];
+}
+
 interface PlayerInfo {
   number: string | number;
   name: string;
@@ -1008,8 +1113,81 @@ export default function App() {
         if (updated) setSelectedMatchPage(updated);
       }
     } catch (err: any) {
-      console.log("Error fetching fixtures:", err);
-      setError(err.message || "An unexpected error occurred while fetching webhook fixtures.");
+      console.warn("Error fetching fixtures, using robust static fallbacks:", err);
+      // In case both the server proxy and n8n webhooks are offline/unreachable (e.g. on Vercel)
+      const data = {
+        matches: getFallbackFixtures(),
+        isFallback: true,
+        errorMsg: `Webhook endpoints are offline (${err.message || "404"}). Loaded static backup fixtures.`
+      };
+      
+      setIsFallbackMatches(true);
+      setApiErrorMsg(data.errorMsg);
+
+      const statusMap: Record<string, string> = {
+        'STATUS_IN_PROGRESS': 'LIVE',
+        'STATUS_HALFTIME':    'LIVE',
+        'STATUS_SCHEDULED':   'UPCOMING',
+        'STATUS_POSTPONED':   'UPCOMING',
+        'STATUS_FINAL':       'FINISHED',
+        'LIVE':               'LIVE',
+        'UPCOMING':           'UPCOMING',
+        'FINISHED':           'FINISHED',
+        'FT':                 'FINISHED',
+        'AET':                'FINISHED',
+        'PEN':                'FINISHED',
+      };
+
+      const parsedMatches: Match[] = data.matches.map((item: any, idx: number) => {
+        const homeTeam = item.homeTeam || item.home_team || "Home Team";
+        const awayTeam = item.awayTeam || item.away_team || "Away Team";
+        const rawStatus = item.status || 'UPCOMING';
+        const minute = item.minute ? Number(item.minute) : undefined;
+
+        let status = (statusMap[rawStatus] || 'UPCOMING') as "UPCOMING" | "LIVE" | "FINISHED";
+
+        if (status === "UPCOMING" && minute && minute > 0 && minute <= 90) {
+          status = "LIVE";
+        }
+
+        return {
+          id:            String(item.id || item.match_id || `match-${idx}`),
+          homeTeam,
+          homeTeamCode:  item.homeTeamCode || homeTeam.substring(0, 3).toUpperCase(),
+          homeTeamFlag:  item.homeTeamFlag || getFlag(homeTeam),
+          awayTeam,
+          awayTeamCode:  item.awayTeamCode || awayTeam.substring(0, 3).toUpperCase(),
+          awayTeamFlag:  item.awayTeamFlag || getFlag(awayTeam),
+          homeScore:     Number(item.homeScore ?? item.home_score ?? 0),
+          awayScore:     Number(item.awayScore ?? item.away_score ?? 0),
+          status,
+          rawStatus,
+          minute,
+          group:         item.group  || item.stage || "Group Stage",
+          stadium:       item.venue  || item.stadium || "FIFA World Cup Stadium",
+          date:          item.date   || getTodayDateString(),
+          time:          item.time   || "",
+          stage:         item.stage  || "Group Stage",
+          events:        Array.isArray(item.events) ? item.events : []
+        };
+      });
+
+      setMatches(parsedMatches);
+
+      // Auto-focus selectedDate on the first available match's date if today has no matches
+      if (parsedMatches.length > 0) {
+        const todayStr = getTodayDateString();
+        const hasTodayMatches = parsedMatches.some(m => m.date === todayStr);
+        if (!hasTodayMatches) {
+          setSelectedDate(parsedMatches[0].date);
+        }
+      }
+
+      // Keep details overlay updated if currently open
+      if (selectedMatchPage) {
+        const updated = parsedMatches.find(m => m.id === selectedMatchPage.id);
+        if (updated) setSelectedMatchPage(updated);
+      }
     } finally {
       setLoading(false);
     }
@@ -3604,12 +3782,8 @@ export default function App() {
 
       {/* Footer */}
       <footer className="py-8 bg-brand-primary text-center text-xs text-white mt-12">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 FIFA World Cup™ Webhook Integration. Built with React & Tailwind CSS.</p>
-          <div className="flex items-center gap-1.5 font-mono text-[10px] text-white/90 font-semibold">
-            <Database className="w-3.5 h-3.5 text-white/80" />
-            <span>n8n Webhook Ingestion Feed Enabled</span>
-          </div>
+        <div className="max-w-7xl mx-auto px-4 text-center">
+          <p>© 2026 FIFA World Cup™</p>
         </div>
       </footer>
 
