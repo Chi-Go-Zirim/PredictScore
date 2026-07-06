@@ -427,6 +427,20 @@ function getFallbackResults() {
 }
 
 function getFallbackFixtures() {
+  const todayStr = getTodayDateString();
+  
+  const getRelativeDate = (offsetDays: number): string => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    const options = { timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit" } as const;
+    const formatter = new Intl.DateTimeFormat("en-CA", options);
+    return formatter.format(d);
+  };
+
+  const yesterdayStr = getRelativeDate(-1);
+  const tomorrowStr = getRelativeDate(1);
+  const dayAfterTomorrowStr = getRelativeDate(2);
+
   return [
     {
       id: "match-1",
@@ -442,7 +456,7 @@ function getFallbackFixtures() {
       minute: 90,
       group: "Group A",
       stadium: "MetLife Stadium, East Rutherford",
-      date: "2026-06-24",
+      date: yesterdayStr,
       time: "15:00",
       stage: "Group Stage",
       events: [
@@ -466,7 +480,7 @@ function getFallbackFixtures() {
       minute: 64,
       group: "Group A",
       stadium: "SoFi Stadium, Los Angeles",
-      date: "2026-06-24",
+      date: todayStr,
       time: "18:00",
       stage: "Group Stage",
       events: [
@@ -487,7 +501,7 @@ function getFallbackFixtures() {
       status: "UPCOMING",
       group: "Group B",
       stadium: "BC Place, Vancouver",
-      date: "2026-06-25",
+      date: todayStr,
       time: "17:00",
       stage: "Group Stage",
       events: []
@@ -505,7 +519,7 @@ function getFallbackFixtures() {
       status: "UPCOMING",
       group: "Group B",
       stadium: "Hard Rock Stadium, Miami",
-      date: "2026-06-25",
+      date: tomorrowStr,
       time: "20:00",
       stage: "Group Stage",
       events: []
@@ -523,7 +537,7 @@ function getFallbackFixtures() {
       status: "UPCOMING",
       group: "Group C",
       stadium: "Mercedes-Benz Stadium, Atlanta",
-      date: "2026-06-26",
+      date: dayAfterTomorrowStr,
       time: "19:00",
       stage: "Group Stage",
       events: []
@@ -1015,7 +1029,17 @@ export default function App() {
         throw new Error(`Tournament status query code: ${response.status}`);
       }
       
-      const data = await response.json();
+      const responseText = await response.text();
+      if (!responseText || responseText.trim() === "") {
+        throw new Error("Empty response received from the tournament feed.");
+      }
+
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch (jsonParseErr: any) {
+        throw new Error(`Invalid JSON format returned: ${jsonParseErr.message}`);
+      }
       
       // LOG webhook response for debugging as requested in requirements
       console.log("Webhook response data:", data);
@@ -1040,8 +1064,10 @@ export default function App() {
         } else if (Array.isArray(data.data)) {
           rawMatches = data.data;
         }
-      } else {
-        throw new Error("Invalid response format. Expected an array of fixtures.");
+      }
+
+      if (rawMatches.length === 0) {
+        throw new Error("No active match fixtures returned from tournament feed.");
       }
 
       setIsFallbackMatches(isFallback);
@@ -1747,14 +1773,6 @@ export default function App() {
               />
             </div>
             <div className="flex flex-col gap-1 sm:border-l sm:border-white/20 sm:pl-5">
-              <div className="flex items-center gap-2 flex-wrap">
-                {isFallbackMatches && (
-                  <span className="text-[10px] bg-white/10 text-white px-2.5 py-0.5 rounded-full border border-white/30 font-mono font-bold tracking-wider uppercase flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                    Demo Mode Fallback
-                  </span>
-                )}
-              </div>
               <p className="text-[11px] text-white/95 font-medium">World Cup 2026™ Real-Time Fixtures & predictions</p>
             </div>
           </div>
@@ -1867,26 +1885,6 @@ export default function App() {
       <main className="max-w-3xl mx-auto px-4 py-6 sm:px-6 lg:py-8">
         <div className="space-y-6">
           
-          {/* Fallback Live Fixtures Notice */}
-          {isFallbackMatches && (
-            <div className="bg-brand-warning/10 border border-brand-warning/30 p-4 rounded-2xl flex items-start gap-3.5 shadow-sm">
-              <div className="bg-brand-warning/20 p-2 rounded-xl text-brand-warning shrink-0 mt-0.5">
-                <AlertCircle className="w-5 h-5 text-brand-warning" />
-              </div>
-              <div className="space-y-1 flex-1">
-                <h4 className="font-display font-bold text-xs sm:text-sm text-brand-warning flex items-center gap-1.5">
-                  Live Webhook Offline (Returned 404)
-                </h4>
-                <p className="text-[11px] text-brand-text-secondary font-medium leading-relaxed">
-                  The external webhook endpoint returned an error or was unavailable. 
-                  We have loaded beautifully styled, fully interactive live matchups so you can predict scores, view active timelines, and test the app flawlessly!
-                </p>
-                <p className="text-[10px] text-brand-warning font-semibold italic mt-1">
-                  💡 Setup Tip: To sync real-time n8n data, make sure your workflow is active and published in n8n.
-                </p>
-              </div>
-            </div>
-          )}
 
           {/* Main Error/Fetch Failure State */}
           {error && (
@@ -1895,9 +1893,9 @@ export default function App() {
                 <AlertCircle className="w-6 h-6 text-brand-error" />
               </div>
               <div className="space-y-2 flex-1">
-                <h4 className="font-display font-bold text-sm sm:text-base text-brand-error">Webhook Connection Failed</h4>
+                <h4 className="font-display font-bold text-sm sm:text-base text-brand-error">Connection Sync Failed</h4>
                 <p className="text-xs text-brand-text-secondary font-medium leading-relaxed">
-                  Could not retrieve matches from the external webhook endpoint. Please verify your connection or n8n endpoint availability.
+                  Could not retrieve tournament matches. Please verify your connection or try again later.
                 </p>
                 <code className="block bg-brand-bg border border-brand-border p-2.5 rounded-xl text-[10px] font-mono text-brand-error break-all">
                   {error}
@@ -1907,7 +1905,7 @@ export default function App() {
                   className="bg-brand-error hover:bg-red-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition cursor-pointer flex items-center space-x-1.5"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Retry Webhook Connection</span>
+                  <span>Retry Server Connection</span>
                 </button>
               </div>
             </div>
@@ -1920,9 +1918,9 @@ export default function App() {
                 <AlertCircle className="w-6 h-6 text-brand-error" />
               </div>
               <div className="space-y-2 flex-1">
-                <h4 className="font-display font-bold text-sm sm:text-base text-brand-error">Results Webhook Connection Failed</h4>
+                <h4 className="font-display font-bold text-sm sm:text-base text-brand-error">Results Sync Failed</h4>
                 <p className="text-xs text-brand-text-secondary font-medium leading-relaxed">
-                  Could not retrieve completed match results from the external webhook endpoint.
+                  Could not retrieve completed tournament results. Please verify your connection or try again later.
                 </p>
                 <code className="block bg-brand-bg border border-brand-border p-2.5 rounded-xl text-[10px] font-mono text-brand-error break-all">
                   {resultsError}

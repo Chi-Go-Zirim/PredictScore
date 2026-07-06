@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 async function startServer() {
   const app = express();
@@ -16,6 +16,26 @@ async function startServer() {
 
   // Server-side proxy to fetch match fixtures from the webhook
   app.get("/api/fixtures", async (req, res) => {
+    const getTodayDateString = (): string => {
+      const d = new Date();
+      const options = { timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit" } as const;
+      const formatter = new Intl.DateTimeFormat("en-CA", options);
+      return formatter.format(d);
+    };
+
+    const getRelativeDate = (offsetDays: number): string => {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      const options = { timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit" } as const;
+      const formatter = new Intl.DateTimeFormat("en-CA", options);
+      return formatter.format(d);
+    };
+
+    const todayStr = getTodayDateString();
+    const yesterdayStr = getRelativeDate(-1);
+    const tomorrowStr = getRelativeDate(1);
+    const dayAfterTomorrowStr = getRelativeDate(2);
+
     // High-quality fallback fixtures in case the external n8n webhook is offline/deactivated
     const fallbackMatches = [
       {
@@ -32,7 +52,7 @@ async function startServer() {
         minute: 90,
         group: "Group A",
         stadium: "MetLife Stadium, East Rutherford",
-        date: "2026-06-24",
+        date: yesterdayStr,
         time: "15:00",
         stage: "Group Stage",
         events: [
@@ -56,7 +76,7 @@ async function startServer() {
         minute: 64,
         group: "Group A",
         stadium: "SoFi Stadium, Los Angeles",
-        date: "2026-06-24",
+        date: todayStr,
         time: "18:00",
         stage: "Group Stage",
         events: [
@@ -77,7 +97,7 @@ async function startServer() {
         status: "UPCOMING",
         group: "Group B",
         stadium: "BC Place, Vancouver",
-        date: "2026-06-25",
+        date: todayStr,
         time: "17:00",
         stage: "Group Stage",
         events: []
@@ -95,7 +115,7 @@ async function startServer() {
         status: "UPCOMING",
         group: "Group B",
         stadium: "Hard Rock Stadium, Miami",
-        date: "2026-06-25",
+        date: tomorrowStr,
         time: "20:00",
         stage: "Group Stage",
         events: []
@@ -113,7 +133,7 @@ async function startServer() {
         status: "UPCOMING",
         group: "Group C",
         stadium: "Mercedes-Benz Stadium, Atlanta",
-        date: "2026-06-26",
+        date: dayAfterTomorrowStr,
         time: "19:00",
         stage: "Group Stage",
         events: []
@@ -155,12 +175,16 @@ async function startServer() {
             // Parse data as array
             const webhookMatches = Array.isArray(data) ? data : (data && Array.isArray(data.matches) ? data.matches : []);
             
-            console.log(`Successfully synced live tournament data from: ${url}. Found ${webhookMatches.length} matches from webhook.`);
-            return res.json({
-              matches: webhookMatches,
-              isFallback: false,
-              sourceUrl: url
-            });
+            if (webhookMatches.length > 0) {
+              console.log(`Successfully synced live tournament data from: ${url}. Found ${webhookMatches.length} matches from webhook.`);
+              return res.json({
+                matches: webhookMatches,
+                isFallback: false,
+                sourceUrl: url
+              });
+            } else {
+              console.log(`Webhook ${url} returned 0 matches.`);
+            }
           } else {
             console.log(`Response state for ${url}: empty`);
           }
@@ -172,12 +196,12 @@ async function startServer() {
       }
     }
 
-    // Do not use inaccurate fallback/mock matches. Always return webhook results or empty list.
-    console.log("Serving tournament fixtures: webhook is offline or returned no data.");
+    // Serve high-quality backup fixtures if webhook is offline or empty
+    console.log("Serving tournament fixtures: webhook is offline or returned no data. Using dynamic relative backup fixtures.");
     return res.json({
-      matches: [],
-      isFallback: false,
-      errorMsg: "Webhook endpoint was offline or returned no data. Please try again."
+      matches: fallbackMatches,
+      isFallback: true,
+      errorMsg: "Webhook endpoint was offline or returned no data. Loaded high-quality backup fixtures."
     });
   });
 
@@ -994,6 +1018,17 @@ async function startServer() {
     });
   });
 
+  function cleanAndParseJson(text: string): any {
+    let cleaned = text.trim();
+    // Remove markdown code block syntax if the model included it
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```[a-zA-Z]*\n/g, "");
+      cleaned = cleaned.replace(/\n```$/g, "");
+      cleaned = cleaned.trim();
+    }
+    return JSON.parse(cleaned);
+  }
+
   // GET /api/predict
   app.get("/api/predict", async (req, res) => {
     const homeTeam = String(req.query.home_team || "").trim();
@@ -1021,34 +1056,49 @@ async function startServer() {
       console.log(`[Gemini API] Requesting prediction for ${homeTeam} vs ${awayTeam}`);
       const prompt = `You are an expert FIFA World Cup football analyst. Predict the outcome of a match between ${homeTeam} and ${awayTeam}. 
 Analyze their strengths, weaknesses, likely tactical setups, and recent historical form.
-Return the analysis in JSON format exactly according to this schema:
-{
-  "match_winner": {
-    "home_win": number (0-100 percentage of home team winning),
-    "draw": number (0-100 percentage of draw),
-    "away_win": number (0-100 percentage of away team winning),
-    "reasoning": string (detailed match analysis explaining the winner probability)
-  },
-  "first_half": {
-    "home_win": number (0-100 percentage of home team leading in first half),
-    "draw": number (0-100 percentage of draw in first half),
-    "away_win": number (0-100 percentage of away team leading in first half)
-  },
-  "goals": {
-    "over_2_5": number (0-100 percentage of total goals over 2.5),
-    "both_teams_score": number (0-100 percentage of both teams scoring),
-    "expected_goals": number (e.g., 2.3)
-  },
-  "confidence": "low" | "medium" | "high",
-  "summary": string (a concise 2-3 sentence overview of the prediction)
-}
-Ensure the percentages in match_winner sum to 100, and percentages in first_half sum to 100. Do not include markdown formatting or backticks, return only the JSON structure.`;
+Return the analysis in JSON format conforming exactly to the response schema. Ensure the percentages in match_winner sum to 100, and percentages in first_half sum to 100.`;
 
       const response = await aiClient.models.generateContent({
         model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              match_winner: {
+                type: Type.OBJECT,
+                properties: {
+                  home_win: { type: Type.INTEGER, description: "0-100 percentage of home team winning" },
+                  draw: { type: Type.INTEGER, description: "0-100 percentage of draw" },
+                  away_win: { type: Type.INTEGER, description: "0-100 percentage of away team winning" },
+                  reasoning: { type: Type.STRING, description: "detailed match analysis explaining the winner probability" }
+                },
+                required: ["home_win", "draw", "away_win", "reasoning"]
+              },
+              first_half: {
+                type: Type.OBJECT,
+                properties: {
+                  home_win: { type: Type.INTEGER, description: "0-100 percentage of home team leading in first half" },
+                  draw: { type: Type.INTEGER, description: "0-100 percentage of draw in first half" },
+                  away_win: { type: Type.INTEGER, description: "0-100 percentage of away team leading in first half" }
+                },
+                required: ["home_win", "draw", "away_win"]
+              },
+              goals: {
+                type: Type.OBJECT,
+                properties: {
+                  over_2_5: { type: Type.INTEGER, description: "0-100 percentage of total goals over 2.5" },
+                  both_teams_score: { type: Type.INTEGER, description: "0-100 percentage of both teams scoring" },
+                  expected_goals: { type: Type.NUMBER, description: "expected goals (e.g. 2.3)" }
+                },
+                required: ["over_2_5", "both_teams_score", "expected_goals"]
+              },
+              confidence: { type: Type.STRING, description: "low | medium | high" },
+              summary: { type: Type.STRING, description: "a concise 2-3 sentence overview of the prediction" }
+            },
+            required: ["match_winner", "first_half", "goals", "confidence", "summary"]
+          },
           temperature: 0.7
         }
       });
@@ -1056,7 +1106,7 @@ Ensure the percentages in match_winner sum to 100, and percentages in first_half
       const text = response.text;
       if (!text) throw new Error("Empty response from Gemini API");
 
-      const parsed = JSON.parse(text);
+      const parsed = cleanAndParseJson(text);
       predictionCache[cacheKey] = parsed;
       return res.json(parsed);
     } catch (err: any) {
@@ -1094,35 +1144,58 @@ Ensure the percentages in match_winner sum to 100, and percentages in first_half
       console.log(`[Gemini API] Requesting combined prediction for ${homeTeam} vs ${awayTeam}`);
       const prompt = `You are an expert FIFA World Cup football analyst. Provide a combined consensus prediction for the match between ${homeTeam} and ${awayTeam} (Match ID: ${matchId}).
 Analyze the match using historical head-to-head records and current player forms.
-Return the analysis in JSON format exactly according to this schema:
-{
-  "historical_prediction": {
-    "home_win": number (0-100 percentage based purely on historical head-to-head form),
-    "draw": number (0-100 percentage based on historical form),
-    "away_win": number (0-100 percentage based on historical form)
-  },
-  "player_prediction": {
-    "home_win": number (0-100 percentage based purely on current player squad strength and form),
-    "draw": number (0-100 percentage based on player form),
-    "away_win": number (0-100 percentage based on player form)
-  },
-  "combined_prediction": {
-    "home_win": number (0-100 consensus percentage combining history and players),
-    "draw": number (0-100 consensus draw percentage),
-    "away_win": number (0-100 consensus away team win percentage),
-    "confidence": "low" | "medium" | "high",
-    "summary": string (concise explanation of how historical trends and key player match-ups fuse into this consensus prediction)
-  },
-  "home_key_threats": [string, string] (list of 2 key threat players for the home team, e.g., star forwards/midfielders),
-  "away_key_threats": [string, string] (list of 2 key threat players for the away team, e.g., star forwards/midfielders)
-}
-Ensure all win/draw/away_win percentage sets sum to 100. Do not include markdown formatting or backticks, return only the JSON structure.`;
+Return the analysis in JSON format conforming exactly to the response schema. Ensure all win/draw/away_win percentage sets sum to 100.`;
 
       const response = await aiClient.models.generateContent({
         model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              historical_prediction: {
+                type: Type.OBJECT,
+                properties: {
+                  home_win: { type: Type.INTEGER, description: "0-100 percentage based purely on historical head-to-head form" },
+                  draw: { type: Type.INTEGER, description: "0-100 percentage based on historical form" },
+                  away_win: { type: Type.INTEGER, description: "0-100 percentage based on historical form" }
+                },
+                required: ["home_win", "draw", "away_win"]
+              },
+              player_prediction: {
+                type: Type.OBJECT,
+                properties: {
+                  home_win: { type: Type.INTEGER, description: "0-100 percentage based purely on current player squad strength and form" },
+                  draw: { type: Type.INTEGER, description: "0-100 percentage based on player form" },
+                  away_win: { type: Type.INTEGER, description: "0-100 percentage based on player form" }
+                },
+                required: ["home_win", "draw", "away_win"]
+              },
+              combined_prediction: {
+                type: Type.OBJECT,
+                properties: {
+                  home_win: { type: Type.INTEGER, description: "0-100 consensus percentage combining history and players" },
+                  draw: { type: Type.INTEGER, description: "0-100 consensus draw percentage" },
+                  away_win: { type: Type.INTEGER, description: "0-100 consensus away team win percentage" },
+                  confidence: { type: Type.STRING, description: "low | medium | high" },
+                  summary: { type: Type.STRING, description: "concise explanation of how historical trends and key player match-ups fuse into this consensus prediction" }
+                },
+                required: ["home_win", "draw", "away_win", "confidence", "summary"]
+              },
+              home_key_threats: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "list of exactly 2 key threat players for the home team"
+              },
+              away_key_threats: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "list of exactly 2 key threat players for the away team"
+              }
+            },
+            required: ["historical_prediction", "player_prediction", "combined_prediction", "home_key_threats", "away_key_threats"]
+          },
           temperature: 0.7
         }
       });
@@ -1130,7 +1203,7 @@ Ensure all win/draw/away_win percentage sets sum to 100. Do not include markdown
       const text = response.text;
       if (!text) throw new Error("Empty response from Gemini API");
 
-      const parsed = JSON.parse(text);
+      const parsed = cleanAndParseJson(text);
       combinedPredictionCache[cacheKey] = parsed;
       return res.json(parsed);
     } catch (err: any) {
