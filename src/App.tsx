@@ -318,232 +318,6 @@ function getDisplayStatusText(raw: string): string {
   return upper;
 }
 
-function getFallbackResults() {
-  return [
-    {
-      match_id: "760441",
-      home_team: "Mexico",
-      away_team: "South Korea",
-      home_score: 1,
-      away_score: 0,
-      status: "FINISHED",
-      date: "2026-06-19",
-      stage: "FIFA World Cup, Group A",
-      group_name: "FIFA World Cup, Group A",
-      stadium: "Estadio Akron",
-      events: [
-        { type: "goal", team: "MEX", player: "Santiago Giménez", minute: 42 }
-      ]
-    },
-    {
-      match_id: "760440",
-      home_team: "Canada",
-      away_team: "Qatar",
-      home_score: 6,
-      away_score: 0,
-      status: "FINISHED",
-      date: "2026-06-18",
-      stage: "FIFA World Cup, Group B",
-      group_name: "FIFA World Cup, Group B",
-      stadium: "BC Place",
-      events: [
-        { type: "goal", team: "CAN", player: "Jonathan David", minute: 12 },
-        { type: "goal", team: "CAN", player: "Alphonso Davies", minute: 28 },
-        { type: "goal", team: "CAN", player: "Cyle Larin", minute: 45 },
-        { type: "goal", team: "CAN", player: "Jonathan David", minute: 57 },
-        { type: "goal", team: "CAN", player: "Tajon Buchanan", minute: 73 },
-        { type: "goal", team: "CAN", player: "Ismaël Koné", minute: 86 }
-      ]
-    },
-    {
-      match_id: "760439",
-      home_team: "Switzerland",
-      away_team: "Bosnia-Herzegovina",
-      home_score: 4,
-      away_score: 1,
-      status: "FINISHED",
-      date: "2026-06-18",
-      stage: "FIFA World Cup, Group B",
-      group_name: "FIFA World Cup, Group B",
-      stadium: "SoFi Stadium",
-      events: [
-        { type: "goal", team: "SUI", player: "Breel Embolo", minute: 18 },
-        { type: "goal", team: "BIH", player: "Edin Džeko", minute: 31 },
-        { type: "goal", team: "SUI", player: "Granit Xhaka", minute: 52 },
-        { type: "goal", team: "SUI", player: "Xherdan Shaqiri", minute: 77 },
-        { type: "goal", team: "SUI", player: "Ruben Vargas", minute: 89 }
-      ]
-    },
-    {
-      match_id: "760438",
-      home_team: "Czechia",
-      away_team: "South Africa",
-      home_score: 1,
-      away_score: 1,
-      status: "FINISHED",
-      date: "2026-06-18",
-      stage: "FIFA World Cup, Group A",
-      group_name: "FIFA World Cup, Group A",
-      stadium: "Mercedes-Benz Stadium",
-      events: [
-        { type: "goal", team: "RSA", player: "Percy Tau", minute: 22 },
-        { type: "goal", team: "CZE", player: "Patrik Schick", minute: 64 }
-      ]
-    },
-    {
-      match_id: "760415",
-      home_team: "Mexico",
-      away_team: "South Africa",
-      home_score: 2,
-      away_score: 0,
-      status: "FINISHED",
-      date: "2026-06-11",
-      stage: "FIFA World Cup, Group A",
-      group_name: "FIFA World Cup, Group A",
-      stadium: "Estadio Banorte",
-      events: [
-        { type: "goal", team: "MEX", player: "Hirving Lozano", minute: 33 },
-        { type: "goal", team: "MEX", player: "Edson Álvarez", minute: 75 }
-      ]
-    },
-    {
-      match_id: "760414",
-      home_team: "South Korea",
-      away_team: "Czechia",
-      home_score: 2,
-      away_score: 1,
-      status: "FINISHED",
-      date: "2026-06-12",
-      stage: "FIFA World Cup, Group A",
-      group_name: "FIFA World Cup, Group A",
-      stadium: "Estadio Akron",
-      events: [
-        { type: "goal", team: "KOR", player: "Son Heung-min", minute: 29 },
-        { type: "goal", team: "CZE", player: "Tomáš Souček", minute: 58 },
-        { type: "goal", team: "KOR", player: "Hwang Hee-chan", minute: 81 }
-      ]
-    }
-  ];
-}
-
-function getFallbackFixtures() {
-  const todayStr = getTodayDateString();
-  
-  const getRelativeDate = (offsetDays: number): string => {
-    const d = new Date();
-    d.setDate(d.getDate() + offsetDays);
-    const options = { timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit" } as const;
-    const formatter = new Intl.DateTimeFormat("en-CA", options);
-    return formatter.format(d);
-  };
-
-  const yesterdayStr = getRelativeDate(-1);
-  const tomorrowStr = getRelativeDate(1);
-  const dayAfterTomorrowStr = getRelativeDate(2);
-
-  return [
-    {
-      id: "match-1",
-      homeTeam: "United States",
-      homeTeamCode: "USA",
-      homeTeamFlag: "🇺🇸",
-      awayTeam: "Germany",
-      awayTeamCode: "GER",
-      awayTeamFlag: "🇩🇪",
-      homeScore: 2,
-      awayScore: 1,
-      status: "FINISHED",
-      minute: 90,
-      group: "Group A",
-      stadium: "MetLife Stadium, East Rutherford",
-      date: yesterdayStr,
-      time: "15:00",
-      stage: "Group Stage",
-      events: [
-        { type: "goal", team: "USA", player: "Christian Pulisic", minute: 14 },
-        { type: "card", team: "GER", player: "Antonio Rüdiger", minute: 42, detail: "Yellow Card" },
-        { type: "goal", team: "GER", player: "Kai Havertz", minute: 55 },
-        { type: "goal", team: "USA", player: "Folarin Balogun", minute: 82 }
-      ]
-    },
-    {
-      id: "match-2",
-      homeTeam: "Japan",
-      homeTeamCode: "JPN",
-      homeTeamFlag: "🇯🇵",
-      awayTeam: "Mexico",
-      awayTeamCode: "MEX",
-      awayTeamFlag: "🇲🇽",
-      homeScore: 1,
-      awayScore: 1,
-      status: "LIVE",
-      minute: 64,
-      group: "Group A",
-      stadium: "SoFi Stadium, Los Angeles",
-      date: todayStr,
-      time: "18:00",
-      stage: "Group Stage",
-      events: [
-        { type: "goal", team: "MEX", player: "Santiago Giménez", minute: 28 },
-        { type: "goal", team: "JPN", player: "Kaoru Mitoma", minute: 49 }
-      ]
-    },
-    {
-      id: "match-3",
-      homeTeam: "Canada",
-      homeTeamCode: "CAN",
-      homeTeamFlag: "🇨🇦",
-      awayTeam: "Italy",
-      awayTeamCode: "ITA",
-      awayTeamFlag: "🇮🇹",
-      homeScore: 0,
-      awayScore: 0,
-      status: "UPCOMING",
-      group: "Group B",
-      stadium: "BC Place, Vancouver",
-      date: todayStr,
-      time: "17:00",
-      stage: "Group Stage",
-      events: []
-    },
-    {
-      id: "match-4",
-      homeTeam: "Spain",
-      homeTeamCode: "ESP",
-      homeTeamFlag: "🇪🇸",
-      awayTeam: "Brazil",
-      awayTeamCode: "BRA",
-      awayTeamFlag: "🇧🇷",
-      homeScore: 0,
-      awayScore: 0,
-      status: "UPCOMING",
-      group: "Group B",
-      stadium: "Hard Rock Stadium, Miami",
-      date: tomorrowStr,
-      time: "20:00",
-      stage: "Group Stage",
-      events: []
-    },
-    {
-      id: "match-5",
-      homeTeam: "France",
-      homeTeamCode: "FRA",
-      homeTeamFlag: "🇫🇷",
-      awayTeam: "Argentina",
-      awayTeamCode: "ARG",
-      awayTeamFlag: "🇦🇷",
-      homeScore: 0,
-      awayScore: 0,
-      status: "UPCOMING",
-      group: "Group C",
-      stadium: "Mercedes-Benz Stadium, Atlanta",
-      date: dayAfterTomorrowStr,
-      time: "19:00",
-      stage: "Group Stage",
-      events: []
-    }
-  ];
-}
 
 interface PlayerInfo {
   number: string | number;
@@ -997,7 +771,7 @@ export default function App() {
     setLbLoading(true);
     try {
       const res = await fetch(
-        'https://mercy-kalu.app.n8n.cloud/webhook/leaderboard'
+        'https://predict-score.app.n8n.cloud/webhook/leaderboard'
       );
       const data = await res.json();
       setLeaderboard(Array.isArray(data) ? data : []);
@@ -1012,18 +786,8 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      // Resilient proxy fetch with fallback to direct webhook fetch
-      let response;
-      try {
-        response = await fetch("/api/fixtures");
-        if (!response.ok) {
-          throw new Error(`Proxy response status: ${response.status}`);
-        }
-      } catch (proxyErr) {
-        console.log("Proxy endpoint fetch status: offline-mode", proxyErr);
-        const url = "https://mercy-kalu.app.n8n.cloud/webhook/world-cup-fixtures";
-        response = await fetch(url);
-      }
+      const url = "https://predict-score.app.n8n.cloud/webhook/world-cup-fixtures";
+      const response = await fetch(url);
       
       if (!response.ok) {
         throw new Error(`Tournament status query code: ${response.status}`);
@@ -1041,15 +805,12 @@ export default function App() {
         throw new Error(`Invalid JSON format returned: ${jsonParseErr.message}`);
       }
       
-      // LOG webhook response for debugging as requested in requirements
       console.log("Webhook response data:", data);
 
       let rawMatches: any[] = [];
-      let isFallback = false;
       let errorMsg: string | null = null;
 
       if (data && typeof data === "object" && !Array.isArray(data) && "matches" in data) {
-        isFallback = !!data.isFallback;
         errorMsg = data.errorMsg || null;
         if (Array.isArray(data.matches)) {
           rawMatches = data.matches;
@@ -1070,7 +831,7 @@ export default function App() {
         throw new Error("No active match fixtures returned from tournament feed.");
       }
 
-      setIsFallbackMatches(isFallback);
+      setIsFallbackMatches(false);
       setApiErrorMsg(errorMsg);
 
       const statusMap: Record<string, string> = {
@@ -1095,7 +856,6 @@ export default function App() {
 
         let status = (statusMap[rawStatus] || 'UPCOMING') as "UPCOMING" | "LIVE" | "FINISHED";
 
-        // Dynamic override: if a match is marked UPCOMING, but has an active minute > 0, it is actually LIVE
         if (status === "UPCOMING" && minute && minute > 0 && minute <= 90) {
           status = "LIVE";
         }
@@ -1124,7 +884,6 @@ export default function App() {
 
       setMatches(parsedMatches);
 
-      // Auto-focus selectedDate on the first available match's date if today has no matches
       if (parsedMatches.length > 0) {
         const todayStr = getTodayDateString();
         const hasTodayMatches = parsedMatches.some(m => m.date === todayStr);
@@ -1133,87 +892,14 @@ export default function App() {
         }
       }
 
-      // Keep details overlay updated if currently open
       if (selectedMatchPage) {
         const updated = parsedMatches.find(m => m.id === selectedMatchPage.id);
         if (updated) setSelectedMatchPage(updated);
       }
     } catch (err: any) {
-      console.warn("Error fetching fixtures, using robust static fallbacks:", err);
-      // In case both the server proxy and n8n webhooks are offline/unreachable (e.g. on Vercel)
-      const data = {
-        matches: getFallbackFixtures(),
-        isFallback: true,
-        errorMsg: `Webhook endpoints are offline (${err.message || "404"}). Loaded static backup fixtures.`
-      };
-      
-      setIsFallbackMatches(true);
-      setApiErrorMsg(data.errorMsg);
-
-      const statusMap: Record<string, string> = {
-        'STATUS_IN_PROGRESS': 'LIVE',
-        'STATUS_HALFTIME':    'LIVE',
-        'STATUS_SCHEDULED':   'UPCOMING',
-        'STATUS_POSTPONED':   'UPCOMING',
-        'STATUS_FINAL':       'FINISHED',
-        'LIVE':               'LIVE',
-        'UPCOMING':           'UPCOMING',
-        'FINISHED':           'FINISHED',
-        'FT':                 'FINISHED',
-        'AET':                'FINISHED',
-        'PEN':                'FINISHED',
-      };
-
-      const parsedMatches: Match[] = data.matches.map((item: any, idx: number) => {
-        const homeTeam = item.homeTeam || item.home_team || "Home Team";
-        const awayTeam = item.awayTeam || item.away_team || "Away Team";
-        const rawStatus = item.status || 'UPCOMING';
-        const minute = item.minute ? Number(item.minute) : undefined;
-
-        let status = (statusMap[rawStatus] || 'UPCOMING') as "UPCOMING" | "LIVE" | "FINISHED";
-
-        if (status === "UPCOMING" && minute && minute > 0 && minute <= 90) {
-          status = "LIVE";
-        }
-
-        return {
-          id:            String(item.id || item.match_id || `match-${idx}`),
-          homeTeam,
-          homeTeamCode:  item.homeTeamCode || homeTeam.substring(0, 3).toUpperCase(),
-          homeTeamFlag:  item.homeTeamFlag || getFlag(homeTeam),
-          awayTeam,
-          awayTeamCode:  item.awayTeamCode || awayTeam.substring(0, 3).toUpperCase(),
-          awayTeamFlag:  item.awayTeamFlag || getFlag(awayTeam),
-          homeScore:     Number(item.homeScore ?? item.home_score ?? 0),
-          awayScore:     Number(item.awayScore ?? item.away_score ?? 0),
-          status,
-          rawStatus,
-          minute,
-          group:         item.group  || item.stage || "Group Stage",
-          stadium:       item.venue  || item.stadium || "FIFA World Cup Stadium",
-          date:          item.date   || getTodayDateString(),
-          time:          item.time   || "",
-          stage:         item.stage  || "Group Stage",
-          events:        Array.isArray(item.events) ? item.events : []
-        };
-      });
-
-      setMatches(parsedMatches);
-
-      // Auto-focus selectedDate on the first available match's date if today has no matches
-      if (parsedMatches.length > 0) {
-        const todayStr = getTodayDateString();
-        const hasTodayMatches = parsedMatches.some(m => m.date === todayStr);
-        if (!hasTodayMatches) {
-          setSelectedDate(parsedMatches[0].date);
-        }
-      }
-
-      // Keep details overlay updated if currently open
-      if (selectedMatchPage) {
-        const updated = parsedMatches.find(m => m.id === selectedMatchPage.id);
-        if (updated) setSelectedMatchPage(updated);
-      }
+      console.warn("Error fetching fixtures:", err);
+      setError("Unable to load fixtures right now. Please refresh the page.");
+      setMatches([]);
     } finally {
       setLoading(false);
     }
@@ -1243,8 +929,7 @@ export default function App() {
         const SUPABASE_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "your-supabase-anon-key";
 
         if (!SUPABASE_KEY || SUPABASE_KEY === "your-supabase-anon-key") {
-          console.warn("Supabase API key is missing or default. Using local fallback results.");
-          data = getFallbackResults();
+          throw new Error("Supabase API key is missing or default.");
         } else {
           try {
             const res = await fetch(
@@ -1266,7 +951,7 @@ export default function App() {
             data = await res.json();
           } catch (directErr: any) {
             console.error("Direct Supabase fetch failed:", directErr);
-            data = getFallbackResults();
+            throw directErr;
           }
         }
       }
@@ -1328,15 +1013,7 @@ export default function App() {
         const anonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "your-supabase-anon-key";
 
         if (!anonKey || anonKey === "your-supabase-anon-key") {
-          console.warn("Supabase API key is missing or default. Using local fallback results.");
-          response = {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              matches: getFallbackResults(),
-              isFallback: true
-            })
-          } as any;
+          throw new Error("Supabase API key is missing or default.");
         } else {
           try {
             response = await fetch(url, {
@@ -1347,15 +1024,8 @@ export default function App() {
               }
             });
           } catch (directErr) {
-            console.error("Direct Supabase fetch failed, using fallback results:", directErr);
-            response = {
-              ok: true,
-              status: 200,
-              json: async () => ({
-                matches: getFallbackResults(),
-                isFallback: true
-              })
-            } as any;
+            console.error("Direct Supabase fetch failed:", directErr);
+            throw directErr;
           }
         }
       }
@@ -1490,7 +1160,7 @@ export default function App() {
     setEventsError(null);
     try {
       const dateFormatted = matchDate.replace(/-/g, '').substring(0, 8);
-      const url = `https://mercy-kalu.app.n8n.cloud/webhook/match-events?match_id=${matchId}&date=${dateFormatted}`;
+      const url = `https://predict-score.app.n8n.cloud/webhook/match-events?match_id=${matchId}&date=${dateFormatted}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to fetch match events');
       const data = await res.json();

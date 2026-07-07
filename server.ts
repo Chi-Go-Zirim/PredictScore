@@ -16,137 +16,13 @@ async function startServer() {
 
   // Server-side proxy to fetch match fixtures from the webhook
   app.get("/api/fixtures", async (req, res) => {
-    const getTodayDateString = (): string => {
-      const d = new Date();
-      const options = { timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit" } as const;
-      const formatter = new Intl.DateTimeFormat("en-CA", options);
-      return formatter.format(d);
-    };
-
-    const getRelativeDate = (offsetDays: number): string => {
-      const d = new Date();
-      d.setDate(d.getDate() + offsetDays);
-      const options = { timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit" } as const;
-      const formatter = new Intl.DateTimeFormat("en-CA", options);
-      return formatter.format(d);
-    };
-
-    const todayStr = getTodayDateString();
-    const yesterdayStr = getRelativeDate(-1);
-    const tomorrowStr = getRelativeDate(1);
-    const dayAfterTomorrowStr = getRelativeDate(2);
-
-    // High-quality fallback fixtures in case the external n8n webhook is offline/deactivated
-    const fallbackMatches = [
-      {
-        id: "match-1",
-        homeTeam: "United States",
-        homeTeamCode: "USA",
-        homeTeamFlag: "🇺🇸",
-        awayTeam: "Germany",
-        awayTeamCode: "GER",
-        awayTeamFlag: "🇩🇪",
-        homeScore: 2,
-        awayScore: 1,
-        status: "FINISHED",
-        minute: 90,
-        group: "Group A",
-        stadium: "MetLife Stadium, East Rutherford",
-        date: yesterdayStr,
-        time: "15:00",
-        stage: "Group Stage",
-        events: [
-          { type: "goal", team: "USA", player: "Christian Pulisic", minute: 14 },
-          { type: "card", team: "GER", player: "Antonio Rüdiger", minute: 42, detail: "Yellow Card" },
-          { type: "goal", team: "GER", player: "Kai Havertz", minute: 55 },
-          { type: "goal", team: "USA", player: "Folarin Balogun", minute: 82 }
-        ]
-      },
-      {
-        id: "match-2",
-        homeTeam: "Japan",
-        homeTeamCode: "JPN",
-        homeTeamFlag: "🇯🇵",
-        awayTeam: "Mexico",
-        awayTeamCode: "MEX",
-        awayTeamFlag: "🇲🇽",
-        homeScore: 1,
-        awayScore: 1,
-        status: "LIVE",
-        minute: 64,
-        group: "Group A",
-        stadium: "SoFi Stadium, Los Angeles",
-        date: todayStr,
-        time: "18:00",
-        stage: "Group Stage",
-        events: [
-          { type: "goal", team: "MEX", player: "Santiago Giménez", minute: 28 },
-          { type: "goal", team: "JPN", player: "Kaoru Mitoma", minute: 49 }
-        ]
-      },
-      {
-        id: "match-3",
-        homeTeam: "Canada",
-        homeTeamCode: "CAN",
-        homeTeamFlag: "🇨🇦",
-        awayTeam: "Italy",
-        awayTeamCode: "ITA",
-        awayTeamFlag: "🇮🇹",
-        homeScore: 0,
-        awayScore: 0,
-        status: "UPCOMING",
-        group: "Group B",
-        stadium: "BC Place, Vancouver",
-        date: todayStr,
-        time: "17:00",
-        stage: "Group Stage",
-        events: []
-      },
-      {
-        id: "match-4",
-        homeTeam: "Spain",
-        homeTeamCode: "ESP",
-        homeTeamFlag: "🇪🇸",
-        awayTeam: "Brazil",
-        awayTeamCode: "BRA",
-        awayTeamFlag: "🇧🇷",
-        homeScore: 0,
-        awayScore: 0,
-        status: "UPCOMING",
-        group: "Group B",
-        stadium: "Hard Rock Stadium, Miami",
-        date: tomorrowStr,
-        time: "20:00",
-        stage: "Group Stage",
-        events: []
-      },
-      {
-        id: "match-5",
-        homeTeam: "France",
-        homeTeamCode: "FRA",
-        homeTeamFlag: "🇫🇷",
-        awayTeam: "Argentina",
-        awayTeamCode: "ARG",
-        awayTeamFlag: "🇦🇷",
-        homeScore: 0,
-        awayScore: 0,
-        status: "UPCOMING",
-        group: "Group C",
-        stadium: "Mercedes-Benz Stadium, Atlanta",
-        date: dayAfterTomorrowStr,
-        time: "19:00",
-        stage: "Group Stage",
-        events: []
-      }
-    ];
-
     const urls = [];
     if (process.env.FIXTURES_WEBHOOK_URL) {
       urls.push(process.env.FIXTURES_WEBHOOK_URL);
     }
     // Also include the production and test URLs
-    urls.push("https://mercy-kalu.app.n8n.cloud/webhook/world-cup-fixtures");
-    urls.push("https://mercy-kalu.app.n8n.cloud/webhook-test/world-cup-fixtures");
+    urls.push("https://predict-score.app.n8n.cloud/webhook/world-cup-fixtures");
+    urls.push("https://predict-score.app.n8n.cloud/webhook-test/world-cup-fixtures");
 
     const uniqueUrls = [...new Set(urls)];
 
@@ -196,12 +72,9 @@ async function startServer() {
       }
     }
 
-    // Serve high-quality backup fixtures if webhook is offline or empty
-    console.log("Serving tournament fixtures: webhook is offline or returned no data. Using dynamic relative backup fixtures.");
-    return res.json({
-      matches: fallbackMatches,
-      isFallback: true,
-      errorMsg: "Webhook endpoint was offline or returned no data. Loaded high-quality backup fixtures."
+    return res.status(502).json({
+      error: "Unable to load fixtures right now. Please refresh the page.",
+      matches: []
     });
   });
 
@@ -236,8 +109,8 @@ async function startServer() {
 
     const urls = [];
     if (matchId) {
-      urls.push(`https://mercy-kalu.app.n8n.cloud/webhook/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
-      urls.push(`https://mercy-kalu.app.n8n.cloud/webhook-test/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
+      urls.push(`https://predict-score.app.n8n.cloud/webhook/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
+      urls.push(`https://predict-score.app.n8n.cloud/webhook-test/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
     }
 
     for (const url of urls) {
@@ -657,118 +530,9 @@ async function startServer() {
     } catch (err: any) {
       console.log(`Error fetching from Supabase: ${err.message}`);
       
-      // Fallback if Supabase fetch fails
-      console.log("Serving fallback/mock match results.");
-      const fallbackResults = [
-        {
-          match_id: "760441",
-          home_team: "Mexico",
-          away_team: "South Korea",
-          home_score: 1,
-          away_score: 0,
-          status: "FINISHED",
-          date: "2026-06-19",
-          stage: "FIFA World Cup, Group A",
-          group_name: "FIFA World Cup, Group A",
-          stadium: "Estadio Akron",
-          events: [
-            { type: "goal", team: "MEX", player: "Santiago Giménez", minute: 42 }
-          ]
-        },
-        {
-          match_id: "760440",
-          home_team: "Canada",
-          away_team: "Qatar",
-          home_score: 6,
-          away_score: 0,
-          status: "FINISHED",
-          date: "2026-06-18",
-          stage: "FIFA World Cup, Group B",
-          group_name: "FIFA World Cup, Group B",
-          stadium: "BC Place",
-          events: [
-            { type: "goal", team: "CAN", player: "Jonathan David", minute: 12 },
-            { type: "goal", team: "CAN", player: "Alphonso Davies", minute: 28 },
-            { type: "goal", team: "CAN", player: "Cyle Larin", minute: 45 },
-            { type: "goal", team: "CAN", player: "Jonathan David", minute: 57 },
-            { type: "goal", team: "CAN", player: "Tajon Buchanan", minute: 73 },
-            { type: "goal", team: "CAN", player: "Ismaël Koné", minute: 86 }
-          ]
-        },
-        {
-          match_id: "760439",
-          home_team: "Switzerland",
-          away_team: "Bosnia-Herzegovina",
-          home_score: 4,
-          away_score: 1,
-          status: "FINISHED",
-          date: "2026-06-18",
-          stage: "FIFA World Cup, Group B",
-          group_name: "FIFA World Cup, Group B",
-          stadium: "SoFi Stadium",
-          events: [
-            { type: "goal", team: "SUI", player: "Breel Embolo", minute: 18 },
-            { type: "goal", team: "BIH", player: "Edin Džeko", minute: 31 },
-            { type: "goal", team: "SUI", player: "Granit Xhaka", minute: 52 },
-            { type: "goal", team: "SUI", player: "Xherdan Shaqiri", minute: 77 },
-            { type: "goal", team: "SUI", player: "Ruben Vargas", minute: 89 }
-          ]
-        },
-        {
-          match_id: "760438",
-          home_team: "Czechia",
-          away_team: "South Africa",
-          home_score: 1,
-          away_score: 1,
-          status: "FINISHED",
-          date: "2026-06-18",
-          stage: "FIFA World Cup, Group A",
-          group_name: "FIFA World Cup, Group A",
-          stadium: "Mercedes-Benz Stadium",
-          events: [
-            { type: "goal", team: "RSA", player: "Percy Tau", minute: 22 },
-            { type: "goal", team: "CZE", player: "Patrik Schick", minute: 64 }
-          ]
-        },
-        {
-          match_id: "760415",
-          home_team: "Mexico",
-          away_team: "South Africa",
-          home_score: 2,
-          away_score: 0,
-          status: "FINISHED",
-          date: "2026-06-11",
-          stage: "FIFA World Cup, Group A",
-          group_name: "FIFA World Cup, Group A",
-          stadium: "Estadio Banorte",
-          events: [
-            { type: "goal", team: "MEX", player: "Hirving Lozano", minute: 33 },
-            { type: "goal", team: "MEX", player: "Edson Álvarez", minute: 75 }
-          ]
-        },
-        {
-          match_id: "760414",
-          home_team: "South Korea",
-          away_team: "Czechia",
-          home_score: 2,
-          away_score: 1,
-          status: "FINISHED",
-          date: "2026-06-12",
-          stage: "FIFA World Cup, Group A",
-          group_name: "FIFA World Cup, Group A",
-          stadium: "Estadio Akron",
-          events: [
-            { type: "goal", team: "KOR", player: "Son Heung-min", minute: 29 },
-            { type: "goal", team: "CZE", player: "Tomáš Souček", minute: 58 },
-            { type: "goal", team: "KOR", player: "Hwang Hee-chan", minute: 81 }
-          ]
-        }
-      ];
-
-      return res.json({
-        matches: fallbackResults,
-        isFallback: true,
-        errorMsg: `Supabase unreachable (${err.message}). Showing fallback results.`
+      return res.status(502).json({
+        error: "Unable to load tournament results. Please try again later.",
+        matches: []
       });
     }
   });
