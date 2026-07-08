@@ -718,13 +718,15 @@ export default function App() {
     if (selectedMatchPage && selectedMatchPage.status === "FINISHED" && user) {
       const fetchMyResult = async () => {
         try {
-          const { data } = await supabase
-            .from('prediction_results')
-            .select('*')
-            .eq('match_id', selectedMatchPage.id)
-            .eq('user_id', user.id)
-            .single();
-          if (data) setMyResult(data);
+          const res = await fetch(`/api/my-result?match_id=${encodeURIComponent(selectedMatchPage.id)}`, {
+            headers: {
+              "Authorization": `Bearer ${Auth.getToken()}`
+            }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data) setMyResult(data);
+          }
         } catch (e) {
           console.error("Failed to fetch myResult:", e);
         }
@@ -742,18 +744,35 @@ export default function App() {
     if (!user) return; // Only save to DB if logged in
 
     try {
-      await supabase.from('user_predictions').upsert({
-        user_id:    user.id,
-        user_email: user.email,
-        match_id:   matchId,
-        home_team:  selectedMatchPage?.homeTeam || '',
-        away_team:  selectedMatchPage?.awayTeam || '',
-        pred_home:  home,
-        pred_away:  away,
-        match_date: selectedMatchPage?.date || '',
-      }, { onConflict: 'user_id,match_id' });
+      const foundMatch = matches.find(m => m.id === matchId) || 
+                         allResults.find(m => m.id === matchId) || 
+                         selectedMatchPage;
+
+      const res = await fetch("/api/predict-save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${Auth.getToken()}`
+        },
+        body: JSON.stringify({
+          matchId,
+          home,
+          away,
+          homeTeam: foundMatch?.homeTeam || '',
+          awayTeam: foundMatch?.awayTeam || '',
+          date: foundMatch?.date || ''
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to save: ${res.statusText}`);
+      }
+
+      // Refresh leaderboard data
+      fetchLeaderboard();
+
     } catch (e) {
-      console.error('Failed to save prediction to DB', e);
+      console.error('Failed to save prediction/leaderboard to backend proxy:', e);
     }
   };
 
@@ -766,17 +785,49 @@ export default function App() {
 
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [lbLoading, setLbLoading] = useState(false);
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [expandedUserPredictions, setExpandedUserPredictions] = useState<{predictions: any[], results: any[]} | null>(null);
+  const [expandedUserLoading, setExpandedUserLoading] = useState<boolean>(false);
+
+  const handleToggleUserExpand = async (userId: string) => {
+    if (!userId) return;
+    if (expandedUserId === userId) {
+      setExpandedUserId(null);
+      setExpandedUserPredictions(null);
+      return;
+    }
+
+    setExpandedUserId(userId);
+    setExpandedUserLoading(true);
+    setExpandedUserPredictions(null);
+
+    try {
+      const res = await fetch(`/api/user-predictions/${encodeURIComponent(userId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setExpandedUserPredictions(data);
+      } else {
+        console.error(`Failed to fetch user predictions for ${userId}: status ${res.status}`);
+      }
+    } catch (e) {
+      console.error(`Error fetching user predictions:`, e);
+    } finally {
+      setExpandedUserLoading(false);
+    }
+  };
 
   const fetchLeaderboard = async () => {
     setLbLoading(true);
     try {
-      const res = await fetch(
-        'https://predict-score.app.n8n.cloud/webhook/leaderboard'
-      );
-      const data = await res.json();
-      setLeaderboard(Array.isArray(data) ? data : []);
+      const res = await fetch('/api/leaderboard');
+      if (res.ok) {
+        const data = await res.json();
+        setLeaderboard(Array.isArray(data) ? data : []);
+      } else {
+        throw new Error(`Leaderboard response status: ${res.status}`);
+      }
     } catch (e) {
-      console.error(e);
+      console.error("Failed to fetch leaderboard from proxy:", e);
     } finally {
       setLbLoading(false);
     }
@@ -1155,12 +1206,25 @@ export default function App() {
     }
   };
 
-  const fetchMatchEvents = async (matchId: string, matchDate: string) => {
+  const fetchMatchEvents = async (matchId: string, matchDate: string, matchStatus?: string) => {
+    // Events fetching should only be for Live and All results sections.
+    // Do not fetch events for Upcoming and Today's match because they have not been played
+    if (activeTab === "ALL" || activeTab === "UPCOMING" || matchStatus === "UPCOMING") {
+      setMatchEvents({
+        events: [],
+        hasEvents: false,
+        leaders: [],
+        home_form: "",
+        away_form: ""
+      });
+      return;
+    }
+
     setEventsLoading(true);
     setEventsError(null);
     try {
       const dateFormatted = matchDate.replace(/-/g, '').substring(0, 8);
-      const url = `https://predict-score.app.n8n.cloud/webhook/match-events?match_id=${matchId}&date=${dateFormatted}`;
+      const url = `/api/match-events?match_id=${matchId}&date=${dateFormatted}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to fetch match events');
       const data = await res.json();
@@ -1294,7 +1358,7 @@ export default function App() {
           setLineups(null);
           setLineupsSectionExpanded(false);
           setDetailTab('events');
-          fetchMatchEvents(match.id, match.date);
+          fetchMatchEvents(match.id, match.date, match.status);
           fetchLineups(match.id, match.homeTeam, match.awayTeam, match.date);
         }}
         className={`group border rounded-2xl cursor-pointer transition-all duration-200 overflow-hidden shadow-xs relative bg-brand-surface hover:bg-brand-primary/5 ${
@@ -1807,55 +1871,232 @@ export default function App() {
                         return `${maskedUsername}@${domainStr}`;
                       };
 
-                      return (
-                        <div key={item.user_id || idx} className="px-4 py-3 grid grid-cols-12 gap-2 items-center hover:bg-brand-secondary/30 transition">
-                          {/* Rank Column */}
-                          <div className="col-span-2 flex items-center">
-                            {rank === 1 ? (
-                              <span className="text-xl" title="1st Place">🥇</span>
-                            ) : rank === 2 ? (
-                              <span className="text-xl" title="2nd Place">🥈</span>
-                            ) : rank === 3 ? (
-                              <span className="text-xl" title="3rd Place">🥉</span>
-                            ) : (
-                              <span className="text-brand-text-secondary font-bold text-sm ml-1">#{rank}</span>
-                            )}
-                          </div>
+                      const rowId = item.user_id || emailVal;
+                      const isExpanded = expandedUserId === rowId;
 
-                          {/* Player Column */}
-                          <div className="col-span-5 flex items-center space-x-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-full bg-brand-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
-                              {emailVal ? emailVal[0].toUpperCase() : "U"}
-                            </div>
-                            <div className="min-w-0 flex items-center space-x-1.5">
-                              <span className="text-sm font-semibold text-brand-text-primary truncate">
-                                {maskEmail(emailVal)}
-                              </span>
-                              {isMe && (
-                                <span className="bg-brand-primary/10 text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded-full border border-brand-primary/20 shrink-0">
-                                  You
-                                </span>
+                      return (
+                        <div key={rowId || idx} className="group border-b border-brand-border/40 last:border-b-0">
+                          <div 
+                            onClick={() => handleToggleUserExpand(rowId)}
+                            className={`px-4 py-3.5 grid grid-cols-12 gap-2 items-center hover:bg-brand-secondary/40 transition cursor-pointer select-none ${isExpanded ? 'bg-brand-secondary/20' : ''}`}
+                          >
+                            {/* Rank Column */}
+                            <div className="col-span-2 flex items-center">
+                              {rank === 1 ? (
+                                <span className="text-xl" title="1st Place">🥇</span>
+                              ) : rank === 2 ? (
+                                <span className="text-xl" title="2nd Place">🥈</span>
+                              ) : rank === 3 ? (
+                                <span className="text-xl" title="3rd Place">🥉</span>
+                              ) : (
+                                <span className="text-brand-text-secondary font-bold text-sm ml-1">#{rank}</span>
                               )}
                             </div>
-                          </div>
 
-                          {/* Points Column */}
-                          <div className="col-span-2 text-center font-bold text-brand-text-primary text-sm">
-                            {pointsVal}
-                          </div>
+                            {/* Player Column */}
+                            <div className="col-span-5 flex items-center space-x-2.5 min-w-0">
+                              <div className="w-8 h-8 rounded-full bg-brand-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
+                                {emailVal ? emailVal[0].toUpperCase() : "U"}
+                              </div>
+                              <div className="min-w-0 flex-1 flex items-center space-x-1.5">
+                                <span className="text-sm font-semibold text-brand-text-primary truncate">
+                                  {maskEmail(emailVal)}
+                                </span>
+                                {isMe && (
+                                  <span className="bg-brand-primary/10 text-brand-primary text-[10px] font-bold px-2 py-0.5 rounded-full border border-brand-primary/20 shrink-0">
+                                    You
+                                  </span>
+                                )}
+                              </div>
+                              <ChevronRight className={`w-4 h-4 text-brand-text-secondary/60 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-90 text-brand-primary" : ""}`} />
+                            </div>
 
-                          {/* Exact Column */}
-                          <div className="col-span-1 text-center text-brand-success text-sm font-semibold">
-                            {exactVal} 🎯
-                          </div>
+                            {/* Points Column */}
+                            <div className="col-span-2 text-center font-bold text-brand-text-primary text-sm">
+                              {pointsVal}
+                            </div>
 
-                          {/* Accuracy Column */}
-                          <div className="col-span-2 text-right">
-                            <div className="text-brand-text-primary text-sm font-semibold">{accuracyVal}%</div>
-                            <div className="w-full h-1 bg-brand-border rounded overflow-hidden mt-1">
-                              <div className="h-full bg-brand-primary rounded" style={{ width: `${accuracyVal}%` }}></div>
+                            {/* Exact Column */}
+                            <div className="col-span-1 text-center text-brand-success text-sm font-semibold">
+                              {exactVal} 🎯
+                            </div>
+
+                            {/* Accuracy Column */}
+                            <div className="col-span-2 text-right">
+                              <div className="text-brand-text-primary text-sm font-semibold">{accuracyVal}%</div>
+                              <div className="w-full h-1 bg-brand-border rounded overflow-hidden mt-1">
+                                <div className="h-full bg-brand-primary rounded" style={{ width: `${accuracyVal}%` }}></div>
+                              </div>
                             </div>
                           </div>
+
+                          {/* Expanded Content Block */}
+                          <AnimatePresence>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="overflow-hidden bg-brand-secondary/10 border-t border-brand-border/30"
+                              >
+                                <div className="p-4 space-y-4">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-brand-border/30">
+                                    <div className="space-y-0.5">
+                                      <h4 className="text-xs font-bold text-brand-text-primary uppercase tracking-wider flex items-center gap-1.5">
+                                        ⚽ Predictions History
+                                      </h4>
+                                      <p className="text-xs text-brand-text-secondary">
+                                        Predictions details for {maskEmail(emailVal)}
+                                      </p>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[11px] font-mono bg-brand-primary/10 border border-brand-primary/25 text-brand-primary px-2.5 py-1 rounded-full font-bold">
+                                        {pointsVal} pts
+                                      </span>
+                                      <span className="text-[11px] font-mono bg-brand-success/10 border border-brand-success/25 text-brand-success px-2.5 py-1 rounded-full font-bold">
+                                        {exactVal} Exact
+                                      </span>
+                                      <span className="text-[11px] font-mono bg-slate-100 border border-slate-200 text-brand-text-secondary px-2.5 py-1 rounded-full font-bold">
+                                        {accuracyVal}% Acc
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {expandedUserLoading ? (
+                                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                                      <div className="w-6 h-6 border-2 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
+                                      <span className="text-xs text-brand-text-secondary font-medium">Loading predictions...</span>
+                                    </div>
+                                  ) : !expandedUserPredictions || (expandedUserPredictions.predictions.length === 0 && expandedUserPredictions.results.length === 0) ? (
+                                    <div className="text-center py-6 text-xs text-brand-text-secondary italic">
+                                      No prediction history found for this player.
+                                    </div>
+                                  ) : (() => {
+                                      const mergedList: any[] = [];
+                                      const processedMatchIds = new Set();
+
+                                      (expandedUserPredictions.predictions || []).forEach(pred => {
+                                        const result = (expandedUserPredictions.results || []).find(r => r.match_id === pred.match_id);
+                                        mergedList.push({
+                                          matchId: pred.match_id,
+                                          homeTeam: pred.home_team,
+                                          awayTeam: pred.away_team,
+                                          predHome: pred.pred_home,
+                                          predAway: pred.pred_away,
+                                          matchDate: pred.match_date,
+                                          actualHome: result?.actual_home ?? null,
+                                          actualAway: result?.actual_away ?? null,
+                                          pointsEarned: result?.points_earned ?? null,
+                                          resultType: result?.result_type ?? 'pending',
+                                          submittedAt: pred.submitted_at
+                                        });
+                                        processedMatchIds.add(pred.match_id);
+                                      });
+
+                                      (expandedUserPredictions.results || []).forEach(result => {
+                                        if (!processedMatchIds.has(result.match_id)) {
+                                          mergedList.push({
+                                            matchId: result.match_id,
+                                            homeTeam: result.home_team,
+                                            awayTeam: result.away_team,
+                                            predHome: result.pred_home,
+                                            predAway: result.pred_away,
+                                            matchDate: null,
+                                            actualHome: result.actual_home,
+                                            actualAway: result.actual_away,
+                                            pointsEarned: result.points_earned,
+                                            resultType: result.result_type,
+                                            submittedAt: result.evaluated_at
+                                          });
+                                        }
+                                      });
+
+                                      mergedList.sort((a, b) => {
+                                        const dateA = a.submittedAt || '';
+                                        const dateB = b.submittedAt || '';
+                                        return dateB.localeCompare(dateA);
+                                      });
+
+                                      return (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[320px] overflow-y-auto pr-1">
+                                          {mergedList.map((pred, pIdx) => {
+                                            const isExact = pred.resultType === 'exact';
+                                            const isCorrect = pred.resultType === 'correct';
+                                            const isWrong = pred.resultType === 'wrong';
+                                            const isPending = pred.resultType === 'pending';
+
+                                            return (
+                                              <div 
+                                                key={pred.matchId || pIdx} 
+                                                className="bg-brand-surface border border-brand-border/60 hover:border-brand-border rounded-xl p-3 flex flex-col justify-between space-y-2.5 transition shadow-sm"
+                                              >
+                                                <div className="flex items-center justify-between text-[10px] font-mono text-brand-text-secondary">
+                                                  <span>
+                                                    {pred.matchDate ? new Date(pred.matchDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Tournament Match'}
+                                                  </span>
+                                                  
+                                                  {isExact && (
+                                                    <span className="bg-brand-success/15 text-brand-success border border-brand-success/20 font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                                      🎯 +3 pts (Exact)
+                                                    </span>
+                                                  )}
+                                                  {isCorrect && (
+                                                    <span className="bg-brand-primary/15 text-brand-primary border border-brand-primary/20 font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                                      ✅ +1 pt (Correct)
+                                                    </span>
+                                                  )}
+                                                  {isWrong && (
+                                                    <span className="bg-brand-error/15 text-brand-error border border-brand-error/20 font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                                      ❌ +0 pts
+                                                    </span>
+                                                  )}
+                                                  {isPending && (
+                                                    <span className="bg-brand-warning/15 text-brand-warning border border-brand-warning/20 font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 animate-pulse-slow">
+                                                      ⏳ Pending match
+                                                    </span>
+                                                  )}
+                                                </div>
+
+                                                <div className="flex items-center justify-between py-1.5 px-2.5 bg-brand-secondary/30 rounded-lg">
+                                                  <div className="flex flex-col min-w-0 flex-1">
+                                                    <span className="text-xs font-bold text-brand-text-primary truncate">
+                                                      {pred.homeTeam}
+                                                    </span>
+                                                    <span className="text-xs font-bold text-brand-text-primary truncate">
+                                                      {pred.awayTeam}
+                                                    </span>
+                                                  </div>
+
+                                                  <div className="flex items-center gap-3 shrink-0 pl-2">
+                                                    <div className="flex flex-col items-center">
+                                                      <span className="text-[9px] font-bold text-brand-text-secondary uppercase tracking-wider">Pred</span>
+                                                      <span className="text-sm font-black text-brand-primary font-mono">
+                                                        {pred.predHome} - {pred.predAway}
+                                                      </span>
+                                                    </div>
+
+                                                    {!isPending && pred.actualHome !== null && (
+                                                      <div className="flex flex-col items-center border-l border-brand-border/80 pl-3">
+                                                        <span className="text-[9px] font-bold text-brand-text-secondary uppercase tracking-wider">Actual</span>
+                                                        <span className="text-sm font-black text-brand-text-primary font-mono">
+                                                          {pred.actualHome} - {pred.actualAway}
+                                                        </span>
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      );
+                                    })()}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       );
                     })}

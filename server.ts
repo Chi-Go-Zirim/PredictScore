@@ -2,12 +2,32 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
+import { createClient } from "@supabase/supabase-js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // --- Supabase Client and UUID Helpers ---
+  const supabaseUrl = "https://iewnlzrzdtuxykgitmft.supabase.co";
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "your-supabase-anon-key";
+  const supabase = createClient(supabaseUrl, anonKey);
+
+  function integerToUuid(id: number): string {
+    const hex = id.toString(16).padStart(12, '0');
+    return `00000000-0000-0000-0000-${hex}`;
+  }
+
+  function uuidToInteger(uuid: string): number {
+    const parts = uuid.split('-');
+    const hex = parts[parts.length - 1];
+    return parseInt(hex, 16);
+  }
 
   // Minimal health endpoint
   app.get("/api/health", (req, res) => {
@@ -34,7 +54,7 @@ async function startServer() {
             "Accept": "application/json",
             "User-Agent": "PredictScore-App"
           },
-          signal: AbortSignal.timeout(5000)
+          signal: AbortSignal.timeout(10000)
         });
 
         if (response.ok) {
@@ -107,6 +127,76 @@ async function startServer() {
     if (!homeTeam) homeTeam = "Home Team";
     if (!awayTeam) awayTeam = "Away Team";
 
+    // 1. Try to fetch from Supabase match_lineups first
+    try {
+      const { data: dbLineups, error: dbError } = await supabase
+        .from("match_lineups")
+        .select("*")
+        .eq("match_id", matchId);
+
+      if (!dbError && dbLineups && dbLineups.length > 0) {
+        console.log(`Serving lineups from Supabase for match ${matchId}`);
+        
+        const homePlayers = dbLineups.filter(p => p.team_side === "home");
+        const awayPlayers = dbLineups.filter(p => p.team_side === "away");
+        
+        const firstPlayer = dbLineups[0];
+        const homeFormation = homePlayers[0]?.formation || "4-3-3";
+        const awayFormation = awayPlayers[0]?.formation || "4-3-3";
+        const lineupType = firstPlayer.lineup_type || "CONFIRMED";
+        const sourceNote = firstPlayer.source_note || "";
+
+        const homeStarters = homePlayers.filter(p => p.is_starter).map(p => ({
+          number: p.jersey_number || "",
+          name: p.player_name,
+          position: p.player_position
+        }));
+
+        const homeBench = homePlayers.filter(p => !p.is_starter).map(p => ({
+          number: p.jersey_number || "",
+          name: p.player_name,
+          position: p.player_position
+        }));
+
+        const awayStarters = awayPlayers.filter(p => p.is_starter).map(p => ({
+          number: p.jersey_number || "",
+          name: p.player_name,
+          position: p.player_position
+        }));
+
+        const awayBench = awayPlayers.filter(p => !p.is_starter).map(p => ({
+          number: p.jersey_number || "",
+          name: p.player_name,
+          position: p.player_position
+        }));
+
+        const formatted = {
+          lineups_available: true,
+          hasLineups: true,
+          lineup_type: lineupType,
+          source_note: sourceNote,
+          home: {
+            team: firstPlayer.home_team || homeTeam,
+            formation: homeFormation,
+            lineup: homeStarters,
+            starters: homeStarters,
+            bench: homeBench
+          },
+          away: {
+            team: firstPlayer.away_team || awayTeam,
+            formation: awayFormation,
+            lineup: awayStarters,
+            starters: awayStarters,
+            bench: awayBench
+          }
+        };
+
+        return res.json(formatted);
+      }
+    } catch (err: any) {
+      console.warn(`Failed to fetch lineups from Supabase: ${err.message}`);
+    }
+
     const urls = [];
     if (matchId) {
       urls.push(`https://predict-score.app.n8n.cloud/webhook/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
@@ -120,16 +210,163 @@ async function startServer() {
             "Accept": "application/json",
             "User-Agent": "PredictScore-App"
           },
-          signal: AbortSignal.timeout(600)
+          signal: AbortSignal.timeout(10000)
         });
 
         if (response.ok) {
           const text = await response.text();
           if (text && text.trim() !== "") {
             const data = JSON.parse(text);
-            if (data && (data.home || data.away)) {
+            if (data && (data.home || data.away || (Array.isArray(data.lineupRows) && data.lineupRows.length > 0))) {
               console.log(`Synced lineups from: ${url}`);
-              return res.json(data);
+
+              // Helper to extract players from teamObj
+              const getPlayersFromTeamObj = (teamObj: any, isStarter: boolean): any[] => {
+                if (!teamObj) return [];
+                const list = isStarter
+                  ? (teamObj.lineup || teamObj.starters || teamObj.players || [])
+                  : (teamObj.bench || []);
+                if (!Array.isArray(list)) return [];
+                return list.map((p: any) => {
+                  const num = p.number ?? p.jersey ?? p.jersey_number ?? p.shirt ?? p.shirt_number ?? "";
+                  const name = p.name ?? p.player_name ?? p.player ?? "";
+                  const position = p.position ?? p.pos ?? p.role ?? "";
+                  return { number: String(num), name, position };
+                });
+              };
+
+              const rawHomeStarters = getPlayersFromTeamObj(data.home, true);
+              const rawHomeBench = getPlayersFromTeamObj(data.home, false);
+              const rawAwayStarters = getPlayersFromTeamObj(data.away, true);
+              const rawAwayBench = getPlayersFromTeamObj(data.away, false);
+
+              const homeFormation = data.home?.formation || "4-3-3";
+              const awayFormation = data.away?.formation || "4-3-3";
+              const lineupType = String(data.lineup_type || data.type || "CONFIRMED").toUpperCase();
+              const sourceNote = data.source_note || data.note || "";
+
+              const formatted = {
+                lineups_available: true,
+                hasLineups: true,
+                lineup_type: lineupType,
+                source_note: sourceNote,
+                home: {
+                  team: data.home?.team || homeTeam,
+                  formation: homeFormation,
+                  lineup: rawHomeStarters,
+                  starters: rawHomeStarters,
+                  bench: rawHomeBench
+                },
+                away: {
+                  team: data.away?.team || awayTeam,
+                  formation: awayFormation,
+                  lineup: rawAwayStarters,
+                  starters: rawAwayStarters,
+                  bench: rawAwayBench
+                }
+              };
+
+              // Save to Supabase match_lineups
+              try {
+                const { error: deleteError } = await supabase
+                  .from("match_lineups")
+                  .delete()
+                  .eq("match_id", matchId);
+
+                if (deleteError) {
+                  console.warn("Error deleting previous lineups in Supabase:", deleteError);
+                }
+
+                const rowsToInsert: any[] = [];
+
+                // Home starters
+                for (const p of rawHomeStarters) {
+                  rowsToInsert.push({
+                    match_id: matchId,
+                    home_team: homeTeam,
+                    away_team: awayTeam,
+                    team_name: homeTeam,
+                    team_side: "home",
+                    formation: homeFormation,
+                    lineup_type: lineupType,
+                    player_name: p.name,
+                    player_position: p.position,
+                    jersey_number: p.number,
+                    is_starter: true,
+                    source_note: sourceNote
+                  });
+                }
+
+                // Home bench
+                for (const p of rawHomeBench) {
+                  rowsToInsert.push({
+                    match_id: matchId,
+                    home_team: homeTeam,
+                    away_team: awayTeam,
+                    team_name: homeTeam,
+                    team_side: "home",
+                    formation: homeFormation,
+                    lineup_type: lineupType,
+                    player_name: p.name,
+                    player_position: p.position,
+                    jersey_number: p.number,
+                    is_starter: false,
+                    source_note: sourceNote
+                  });
+                }
+
+                // Away starters
+                for (const p of rawAwayStarters) {
+                  rowsToInsert.push({
+                    match_id: matchId,
+                    home_team: homeTeam,
+                    away_team: awayTeam,
+                    team_name: awayTeam,
+                    team_side: "away",
+                    formation: awayFormation,
+                    lineup_type: lineupType,
+                    player_name: p.name,
+                    player_position: p.position,
+                    jersey_number: p.number,
+                    is_starter: true,
+                    source_note: sourceNote
+                  });
+                }
+
+                // Away bench
+                for (const p of rawAwayBench) {
+                  rowsToInsert.push({
+                    match_id: matchId,
+                    home_team: homeTeam,
+                    away_team: awayTeam,
+                    team_name: awayTeam,
+                    team_side: "away",
+                    formation: awayFormation,
+                    lineup_type: lineupType,
+                    player_name: p.name,
+                    player_position: p.position,
+                    jersey_number: p.number,
+                    is_starter: false,
+                    source_note: sourceNote
+                  });
+                }
+
+                if (rowsToInsert.length > 0) {
+                  const { error: insertError } = await supabase
+                    .from("match_lineups")
+                    .insert(rowsToInsert);
+
+                  if (insertError) {
+                    console.warn("Error inserting lineups into Supabase:", insertError);
+                  } else {
+                    console.log(`Successfully saved ${rowsToInsert.length} lineup entries to Supabase for match ${matchId}`);
+                  }
+                }
+              } catch (saveErr: any) {
+                console.warn("Error inside lineup save logic:", saveErr.message);
+              }
+
+              return res.json(formatted);
             }
           }
         }
@@ -486,6 +723,202 @@ async function startServer() {
     return res.json(finalLineup);
   });
 
+  // Server-side proxy to fetch match events from the n8n webhook and save to Supabase
+  app.get("/api/match-events", async (req, res) => {
+    const { match_id, date } = req.query;
+    const matchId = String(match_id || "");
+    const dateFormatted = String(date || "");
+
+    if (!matchId) {
+      return res.status(400).json({ error: "match_id is required" });
+    }
+
+    const urls = [
+      `https://predict-score.app.n8n.cloud/webhook/match-events?match_id=${matchId}&date=${dateFormatted}`,
+      `https://predict-score.app.n8n.cloud/webhook-test/match-events?match_id=${matchId}&date=${dateFormatted}`
+    ];
+
+    let webhookData: any = null;
+    let fetchedFromWebhook = false;
+
+    for (const url of urls) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "Accept": "application/json",
+            "User-Agent": "PredictScore-App"
+          },
+          signal: AbortSignal.timeout(10000)
+        });
+
+        if (response.ok) {
+          const text = await response.text();
+          if (text && text.trim() !== "") {
+            const parsed = JSON.parse(text);
+            if (parsed && (Array.isArray(parsed) || Array.isArray(parsed.events) || parsed.hasEvents !== undefined)) {
+              webhookData = parsed;
+              fetchedFromWebhook = true;
+              console.log(`Synced match events from: ${url}`);
+              break;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`Failed fetching match-events from webhook ${url}: ${err.message}`);
+      }
+    }
+
+    let eventsToSave: any[] = [];
+    let responseObj: any = null;
+
+    if (fetchedFromWebhook && webhookData) {
+      responseObj = webhookData;
+      if (Array.isArray(webhookData)) {
+        eventsToSave = webhookData;
+        responseObj = {
+          events: webhookData,
+          hasEvents: webhookData.length > 0,
+          leaders: [],
+          home_form: "",
+          away_form: ""
+        };
+      } else if (Array.isArray(webhookData.events)) {
+        eventsToSave = webhookData.events;
+      }
+    }
+
+    // If webhook fetch failed or returned nothing, try fetching from Supabase
+    if (eventsToSave.length === 0) {
+      try {
+        const { data: dbEvents, error: dbError } = await supabase
+          .from("match_events")
+          .select("*")
+          .eq("match_id", matchId)
+          .order("minute_value", { ascending: true });
+
+        if (!dbError && dbEvents && dbEvents.length > 0) {
+          console.log(`Serving match events from Supabase for match ${matchId}`);
+          return res.json({
+            events: dbEvents,
+            hasEvents: true,
+            leaders: [],
+            home_form: "",
+            away_form: ""
+          });
+        }
+      } catch (err: any) {
+        console.warn(`Failed to fetch from Supabase: ${err.message}`);
+      }
+    }
+
+    // If still no events, do not generate any fallback/hardcoded events
+    if (eventsToSave.length === 0) {
+      console.log(`No match events available for ${matchId} (no fallback generated)`);
+      responseObj = {
+        events: [],
+        hasEvents: false,
+        leaders: [],
+        home_form: "",
+        away_form: ""
+      };
+    }
+
+    // Save/upsert events to Supabase match_events
+    if (eventsToSave && eventsToSave.length > 0) {
+      try {
+        const matchTeamsMap: Record<string, { home: string, away: string }> = {
+          "760441": { home: "Mexico", away: "South Korea" },
+          "760440": { home: "Canada", away: "Qatar" },
+          "760439": { home: "Switzerland", away: "Bosnia-Herzegovina" },
+          "760438": { home: "Czechia", away: "South Africa" },
+          "760415": { home: "Mexico", away: "South Africa" },
+          "760414": { home: "South Korea", away: "Czechia" }
+        };
+        const teams = matchTeamsMap[matchId] || { home: "Home", away: "Away" };
+
+        const { error: deleteError } = await supabase
+          .from("match_events")
+          .delete()
+          .eq("match_id", matchId);
+
+        if (deleteError) {
+          console.warn("Error deleting previous events in Supabase:", deleteError);
+        }
+
+        const rowsToInsert = eventsToSave.map((evt: any) => {
+          const minuteStr = String(evt.minute !== undefined ? evt.minute : (evt.time !== undefined ? evt.time : ""));
+          const minVal = evt.minute_value !== undefined ? parseInt(evt.minute_value) : parseInt(minuteStr) || 0;
+
+          let side = evt.team_side;
+          if (!side) {
+            const isHome = evt.team === "home" || 
+                           evt.team === teams.home || 
+                           evt.is_home || 
+                           evt.isHome || 
+                           evt.team_side === "home";
+            side = isHome ? "home" : "away";
+          }
+
+          let iconVal = evt.icon || "";
+          if (!iconVal) {
+            const t = (evt.type || "").toLowerCase();
+            const isOG = t.includes("og") || t.includes("own") || !!evt.is_og || !!evt.is_own_goal || (evt.detail || "").toLowerCase().includes("own goal") || (evt.detail || "").toLowerCase().includes("(og)");
+            const isPenalty = t.includes("penalty") || t.includes("pen") || !!evt.is_penalty || (evt.detail || "").toLowerCase().includes("penalty");
+            const isRed = t.includes("red") || (evt.detail || "").toLowerCase().includes("red card") || evt.card === "red";
+            const isYellow = t.includes("yellow") || (evt.detail || "").toLowerCase().includes("yellow card") || evt.card === "yellow" || (t === "card" && !isRed);
+            
+            if (isOG) iconVal = "⚽🔴";
+            else if (isPenalty) iconVal = "⚽🎯";
+            else if (isRed) iconVal = "🟥";
+            else if (isYellow) iconVal = "🟨";
+            else iconVal = "⚽";
+          }
+
+          const is_scoring = evt.is_scoring_play !== undefined 
+            ? !!evt.is_scoring_play 
+            : ((evt.type || "").toLowerCase().includes("goal") || !!evt.is_own_goal || !!evt.is_penalty || !!evt.is_scoring_play);
+
+          return {
+            match_id: matchId,
+            home_team: teams.home,
+            away_team: teams.away,
+            minute: minuteStr,
+            minute_value: minVal,
+            event_type: evt.event_type || evt.type || "event",
+            event_label: evt.event_label || evt.detail || evt.type || "Event",
+            icon: iconVal,
+            player_name: evt.player_name || evt.player || "Unknown Player",
+            player_short: evt.player_short || evt.player_name || evt.player || "Player",
+            team_name: side === "home" ? teams.home : teams.away,
+            team_abbr: evt.team_abbr || evt.team || (side === "home" ? "HOME" : "AWAY"),
+            team_side: side,
+            is_scoring_play: is_scoring,
+            is_penalty: evt.is_penalty || (evt.type || "").toLowerCase().includes("penalty") || (evt.type || "").toLowerCase().includes("pen") || false,
+            is_own_goal: evt.is_own_goal || (evt.type || "").toLowerCase().includes("og") || (evt.type || "").toLowerCase().includes("own") || false,
+            assist_player: evt.assist_player || null,
+            score_at_moment: evt.score_at_moment || null,
+            player_jersey: evt.player_jersey || null,
+            player_position: evt.player_position || null
+          };
+        });
+
+        const { error: insertError } = await supabase
+          .from("match_events")
+          .insert(rowsToInsert);
+
+        if (insertError) {
+          console.warn("Error inserting events to Supabase:", insertError);
+        } else {
+          console.log(`Successfully saved ${rowsToInsert.length} events to Supabase for match ${matchId}`);
+        }
+      } catch (err: any) {
+        console.warn("Exception during saving to Supabase:", err.message);
+      }
+    }
+
+    return res.json(responseObj);
+  });
+
   // Server-side proxy to fetch match results from Supabase REST API
   app.get("/api/results", async (req, res) => {
     const supabaseUrl = "https://iewnlzrzdtuxykgitmft.supabase.co/rest/v1/wc_all_results?order=date.desc";
@@ -534,6 +967,286 @@ async function startServer() {
         error: "Unable to load tournament results. Please try again later.",
         matches: []
       });
+    }
+  });
+
+  // Safe server-side endpoint to fetch the leaderboard from Supabase
+  app.get("/api/leaderboard", async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from('leaderboard')
+        .select('*')
+        .order('total_points', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data && data.length > 0) {
+        return res.json(data);
+      } else {
+        // Fallback to webhook if table is empty
+        const webhookUrl = 'https://predict-score.app.n8n.cloud/webhook/leaderboard';
+        const response = await fetch(webhookUrl);
+        const webhookData = await response.json();
+        return res.json(Array.isArray(webhookData) ? webhookData : []);
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch leaderboard from Supabase REST, attempting webhook fallback:", err.message);
+      try {
+        const webhookUrl = 'https://predict-score.app.n8n.cloud/webhook/leaderboard';
+        const response = await fetch(webhookUrl);
+        const webhookData = await response.json();
+        return res.json(Array.isArray(webhookData) ? webhookData : []);
+      } catch (webhookErr: any) {
+        console.error("Leaderboard fallback failed:", webhookErr.message);
+        return res.status(500).json({ error: "Failed to load leaderboard" });
+      }
+    }
+  });
+
+  // Get all predictions for a specific user to display in the leaderboard detail view
+  app.get("/api/user-predictions/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const { data: predictions, error: predError } = await supabase
+        .from('user_predictions')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (predError) {
+        throw predError;
+      }
+
+      const { data: results, error: resultsError } = await supabase
+        .from('prediction_results')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (resultsError) {
+        throw resultsError;
+      }
+
+      return res.json({
+        predictions: predictions || [],
+        results: results || []
+      });
+    } catch (err: any) {
+      console.error("Failed to fetch user predictions:", err.message);
+      return res.status(500).json({ error: "Failed to load predictions for this user" });
+    }
+  });
+
+  // Get prediction_results for current user and match
+  app.get("/api/my-result", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const token = authHeader.split(" ")[1];
+      const matchId = req.query.match_id;
+
+      if (!matchId) {
+        return res.status(400).json({ error: "match_id is required" });
+      }
+
+      const { data: session, error: sessionError } = await supabase
+        .from("user_sessions")
+        .select("user_id")
+        .eq("token", token)
+        .maybeSingle();
+
+      if (sessionError || !session) {
+        return res.status(401).json({ error: "Invalid session" });
+      }
+
+      const userUuid = integerToUuid(session.user_id);
+
+      const { data, error } = await supabase
+        .from('prediction_results')
+        .select('*')
+        .eq('match_id', matchId)
+        .eq('user_id', userUuid)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error fetching myResult:", error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      return res.json(data || null);
+    } catch (err: any) {
+      console.error("Exception in my-result:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Save prediction and update leaderboard entry
+  app.post("/api/predict-save", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const token = authHeader.split(" ")[1];
+
+      const { matchId, home, away, homeTeam, awayTeam, date } = req.body;
+
+      if (!matchId || home === undefined || away === undefined) {
+        return res.status(400).json({ error: "matchId, home, and away are required" });
+      }
+
+      const { data: session, error: sessionError } = await supabase
+        .from("user_sessions")
+        .select("user_id")
+        .eq("token", token)
+        .maybeSingle();
+
+      if (sessionError || !session) {
+        return res.status(401).json({ error: "Invalid session" });
+      }
+
+      const userUuid = integerToUuid(session.user_id);
+
+      // Fetch user details to get email
+      const { data: user, error: userError } = await supabase
+        .from("users")
+        .select("email")
+        .eq("id", session.user_id)
+        .maybeSingle();
+
+      if (userError || !user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Check if prediction already exists
+      const { data: existing } = await supabase
+        .from('user_predictions')
+        .select('id')
+        .eq('user_id', userUuid)
+        .eq('match_id', matchId)
+        .maybeSingle();
+
+      if (existing) {
+        const { error: updateError } = await supabase
+          .from('user_predictions')
+          .update({
+            pred_home: home,
+            pred_away: away,
+            home_team: homeTeam || '',
+            away_team: awayTeam || '',
+            match_date: date || '',
+            submitted_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+      } else {
+        const { error: insertError } = await supabase
+          .from('user_predictions')
+          .insert({
+            user_id: userUuid,
+            user_email: user.email,
+            match_id: matchId,
+            home_team: homeTeam || '',
+            away_team: awayTeam || '',
+            pred_home: home,
+            pred_away: away,
+            match_date: date || '',
+            submitted_at: new Date().toISOString(),
+          });
+
+        if (insertError) {
+          throw insertError;
+        }
+      }
+
+      // Recalculate leaderboard entry for this user
+      const { count, error: countError } = await supabase
+        .from('user_predictions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userUuid);
+      
+      if (countError) {
+        console.error("Leaderboard recalculation count error:", countError);
+      }
+
+      const total_predictions = count || 0;
+
+      const { data: results, error: resultsError } = await supabase
+        .from('prediction_results')
+        .select('*')
+        .eq('user_id', userUuid);
+
+      if (resultsError) {
+        console.error("Leaderboard recalculation prediction_results error:", resultsError);
+      }
+
+      const total_points = (results || []).reduce((sum, r) => sum + (r.points_earned || 0), 0);
+      const exact_scores = (results || []).filter(r => r.result_type === 'exact').length;
+      const correct_results = (results || []).filter(r => r.result_type === 'exact' || r.result_type === 'correct').length;
+      const wrong_predictions = (results || []).filter(r => r.result_type === 'wrong').length;
+      const accuracy_pct = (results && results.length > 0) 
+        ? Math.round((correct_results / results.length) * 100) 
+        : 0;
+
+      const { data: existingLb, error: lbCheckError } = await supabase
+        .from('leaderboard')
+        .select('user_id')
+        .eq('user_id', userUuid)
+        .maybeSingle();
+
+      if (lbCheckError) {
+        console.error("Leaderboard check error:", lbCheckError);
+      }
+
+      if (existingLb) {
+        const { error: lbUpdateError } = await supabase
+          .from('leaderboard')
+          .update({
+            user_email: user.email,
+            total_points: total_points,
+            total_predictions: total_predictions,
+            exact_scores: exact_scores,
+            correct_results: correct_results,
+            wrong_predictions: wrong_predictions,
+            accuracy_pct: accuracy_pct,
+            last_active: new Date().toISOString()
+          })
+          .eq('user_id', userUuid);
+
+        if (lbUpdateError) {
+          console.error("Leaderboard update error:", lbUpdateError);
+        }
+      } else {
+        const { error: lbInsertError } = await supabase
+          .from('leaderboard')
+          .insert({
+            user_id: userUuid,
+            user_email: user.email,
+            total_points: total_points,
+            total_predictions: total_predictions,
+            exact_scores: exact_scores,
+            correct_results: correct_results,
+            wrong_predictions: wrong_predictions,
+            accuracy_pct: accuracy_pct,
+            last_active: new Date().toISOString()
+          });
+
+        if (lbInsertError) {
+          console.error("Leaderboard insert error:", lbInsertError);
+        }
+      }
+
+      return res.json({ success: true, userUuid });
+
+    } catch (err: any) {
+      console.error("Exception in predict-save:", err);
+      return res.status(500).json({ error: err.message });
     }
   });
 
@@ -712,74 +1425,124 @@ async function startServer() {
     };
   }
 
-  // --- In-memory User Registry for Authentication ---
-  interface AuthUser {
-    id: string;
-    name: string;
-    email: string;
-    passwordHash: string;
-  }
-  const usersDb: Array<AuthUser> = [];
-
   // POST /api/signup
-  app.post("/api/signup", (req, res) => {
-    const { name, email, password, confirmPassword } = req.body;
+  app.post("/api/signup", async (req, res) => {
+    try {
+      const { name, email, password, confirmPassword } = req.body;
 
-    if (!name || typeof name !== "string" || name.trim().length < 2) {
-      return res.status(400).json({ error: "Full Name must be at least 2 characters" });
-    }
-    if (!email || typeof email !== "string" || !email.includes("@")) {
-      return res.status(400).json({ error: "Please enter a valid email address" });
-    }
-    if (!password || typeof password !== "string" || password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
-    }
-    if (password !== confirmPassword) {
-      return res.status(400).json({ error: "Passwords do not match" });
-    }
+      if (!name || typeof name !== "string" || name.trim().length < 2) {
+        return res.status(400).json({ error: "Full Name must be at least 2 characters" });
+      }
+      if (!email || typeof email !== "string" || !email.includes("@")) {
+        return res.status(400).json({ error: "Please enter a valid email address" });
+      }
+      if (!password || typeof password !== "string" || password.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      }
+      if (password !== confirmPassword) {
+        return res.status(400).json({ error: "Passwords do not match" });
+      }
 
-    const trimmedEmail = email.trim().toLowerCase();
-    const existingUser = usersDb.find(u => u.email.toLowerCase() === trimmedEmail);
-    if (existingUser) {
-      return res.status(400).json({ error: "A user with this email already exists" });
+      const trimmedEmail = email.trim().toLowerCase();
+
+      // Check if user already exists
+      const { data: existingUser, error: checkError } = await supabase
+        .from("users")
+        .select("id")
+        .eq("email", trimmedEmail)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error("Error checking existing user in Supabase:", checkError);
+        return res.status(500).json({ error: "Database error during check" });
+      }
+
+      if (existingUser) {
+        return res.status(400).json({ error: "A user with this email already exists" });
+      }
+
+      // Create user object in Supabase
+      const { data: newUser, error: insertError } = await supabase
+        .from("users")
+        .insert({
+          name: name.trim(),
+          email: trimmedEmail,
+          password_hash: password
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("Error inserting user to Supabase:", insertError);
+        return res.status(500).json({ error: insertError.message || "Failed to create user" });
+      }
+
+      const token = `ps_token_${newUser.id}_${Date.now()}`;
+
+      // Insert session to Supabase
+      await supabase.from("user_sessions").insert({
+        user_id: newUser.id,
+        token: token
+      });
+
+      const userUuid = integerToUuid(newUser.id);
+
+      return res.status(201).json({
+        token,
+        user: { id: userUuid, name: newUser.name, email: newUser.email, username: newUser.name }
+      });
+    } catch (err: any) {
+      console.error("Signup exception:", err);
+      return res.status(500).json({ error: err.message || "An unexpected error occurred during signup" });
     }
-
-    // Create user object
-    const user: AuthUser = {
-      id: `user-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      name: name.trim(),
-      email: trimmedEmail,
-      passwordHash: password
-    };
-
-    usersDb.push(user);
-
-    const token = `ps_token_${user.id}_${Date.now()}`;
-    return res.status(201).json({
-      token,
-      user: { id: user.id, name: user.name, email: user.email, username: user.name }
-    });
   });
 
   // POST /api/login
-  app.post("/api/login", (req, res) => {
-    const { email, password } = req.body;
+  app.post("/api/login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+
+      const trimmedEmail = String(email).trim().toLowerCase();
+
+      // Query user from Supabase
+      const { data: user, error: loginError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("email", trimmedEmail)
+        .eq("password_hash", password)
+        .maybeSingle();
+
+      if (loginError) {
+        console.error("Error logging in from Supabase:", loginError);
+        return res.status(500).json({ error: "Database error during login" });
+      }
+
+      if (!user) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      const token = `ps_token_${user.id}_${Date.now()}`;
+
+      // Insert session to Supabase
+      await supabase.from("user_sessions").insert({
+        user_id: user.id,
+        token: token
+      });
+
+      const userUuid = integerToUuid(user.id);
+
+      return res.json({
+        token,
+        user: { id: userUuid, name: user.name, email: user.email, username: user.name }
+      });
+    } catch (err: any) {
+      console.error("Login exception:", err);
+      return res.status(500).json({ error: err.message || "An unexpected error occurred during login" });
     }
-
-    const trimmedEmail = String(email).trim().toLowerCase();
-    const user = usersDb.find(u => u.email.toLowerCase() === trimmedEmail && u.passwordHash === password);
-    if (!user) {
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
-    const token = `ps_token_${user.id}_${Date.now()}`;
-    return res.json({
-      token,
-      user: { id: user.id, name: user.name, email: user.email, username: user.name }
-    });
   });
 
   function cleanAndParseJson(text: string): any {
