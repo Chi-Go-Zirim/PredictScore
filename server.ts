@@ -41,8 +41,8 @@ async function startServer() {
       urls.push(process.env.FIXTURES_WEBHOOK_URL);
     }
     // Also include the production and test URLs
-    urls.push("https://predict-score.app.n8n.cloud/webhook/world-cup-fixtures");
-    urls.push("https://predict-score.app.n8n.cloud/webhook-test/world-cup-fixtures");
+    urls.push("https://predictscore.app.n8n.cloud/webhook/world-cup-fixtures");
+    urls.push("https://predictscore.app.n8n.cloud/webhook-test/world-cup-fixtures");
 
     const uniqueUrls = [...new Set(urls)];
 
@@ -199,8 +199,8 @@ async function startServer() {
 
     const urls = [];
     if (matchId) {
-      urls.push(`https://predict-score.app.n8n.cloud/webhook/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
-      urls.push(`https://predict-score.app.n8n.cloud/webhook-test/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
+      urls.push(`https://predictscore.app.n8n.cloud/webhook/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
+      urls.push(`https://predictscore.app.n8n.cloud/webhook-test/match-lineups?match_id=${matchId}&home_team=${encodeURIComponent(homeTeam)}&away_team=${encodeURIComponent(awayTeam)}&match_date=${match_date || ""}`);
     }
 
     for (const url of urls) {
@@ -734,8 +734,8 @@ async function startServer() {
     }
 
     const urls = [
-      `https://predict-score.app.n8n.cloud/webhook/match-events?match_id=${matchId}&date=${dateFormatted}`,
-      `https://predict-score.app.n8n.cloud/webhook-test/match-events?match_id=${matchId}&date=${dateFormatted}`
+      `https://predictscore.app.n8n.cloud/webhook/match-events?match_id=${matchId}&date=${dateFormatted}`,
+      `https://predictscore.app.n8n.cloud/webhook-test/match-events?match_id=${matchId}&date=${dateFormatted}`
     ];
 
     let webhookData: any = null;
@@ -986,7 +986,7 @@ async function startServer() {
         return res.json(data);
       } else {
         // Fallback to webhook if table is empty
-        const webhookUrl = 'https://predict-score.app.n8n.cloud/webhook/leaderboard';
+        const webhookUrl = 'https://predictscore.app.n8n.cloud/webhook/leaderboard';
         const response = await fetch(webhookUrl);
         const webhookData = await response.json();
         return res.json(Array.isArray(webhookData) ? webhookData : []);
@@ -994,7 +994,7 @@ async function startServer() {
     } catch (err: any) {
       console.error("Failed to fetch leaderboard from Supabase REST, attempting webhook fallback:", err.message);
       try {
-        const webhookUrl = 'https://predict-score.app.n8n.cloud/webhook/leaderboard';
+        const webhookUrl = 'https://predictscore.app.n8n.cloud/webhook/leaderboard';
         const response = await fetch(webhookUrl);
         const webhookData = await response.json();
         return res.json(Array.isArray(webhookData) ? webhookData : []);

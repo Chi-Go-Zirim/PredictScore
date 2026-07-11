@@ -243,6 +243,45 @@ function getFlag(team: string): string {
   return "🏳️";
 }
 
+function convertUtcToWat(dateStr: string, timeStr: string): { date: string; time: string } {
+  if (!dateStr) return { date: dateStr, time: timeStr || "" };
+  try {
+    const time = timeStr && timeStr.trim() ? timeStr.trim() : "00:00";
+    const dateString = dateStr.includes("T") ? dateStr : `${dateStr}T${time}:00`;
+    // Treat as UTC by appending 'Z' if no offset or timezone designator is present
+    const normalized = (dateString.endsWith("Z") || dateString.includes("+") || dateString.includes("-", 10))
+      ? dateString
+      : dateString + "Z";
+    
+    const dateObj = new Date(normalized);
+    if (isNaN(dateObj.getTime())) {
+      return { date: dateStr, time: timeStr || "" };
+    }
+
+    // Format YYYY-MM-DD in WAT (Africa/Lagos)
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Lagos",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    const watDate = formatter.format(dateObj);
+
+    // Format HH:MM in WAT (Africa/Lagos)
+    const watTime = dateObj.toLocaleTimeString('en-GB', {
+      timeZone: 'Africa/Lagos',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+
+    return { date: watDate, time: watTime };
+  } catch (err) {
+    console.error("Error converting UTC to WAT:", err);
+    return { date: dateStr, time: timeStr || "" };
+  }
+}
+
 function getTodayDateString(): string {
   const d = new Date();
   const options = { timeZone: "Africa/Lagos", year: "numeric", month: "2-digit", day: "2-digit" } as const;
@@ -837,7 +876,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const url = "https://predict-score.app.n8n.cloud/webhook/world-cup-fixtures";
+      const url = "https://predictscore.app.n8n.cloud/webhook/world-cup-fixtures";
       const response = await fetch(url);
       
       if (!response.ok) {
@@ -911,6 +950,8 @@ export default function App() {
           status = "LIVE";
         }
 
+        const converted = convertUtcToWat(item.date || getTodayDateString(), item.time || "");
+
         return {
           id:            String(item.id || item.match_id || `match-${idx}`),
           homeTeam,
@@ -926,8 +967,8 @@ export default function App() {
           minute,
           group:         item.group  || item.stage || "Group Stage",
           stadium:       item.venue  || item.stadium || "FIFA World Cup Stadium",
-          date:          item.date   || getTodayDateString(),
-          time:          item.time   || "",
+          date:          converted.date,
+          time:          converted.time,
           stage:         item.stage  || "Group Stage",
           events:        Array.isArray(item.events) ? item.events : []
         };
@@ -1126,6 +1167,8 @@ export default function App() {
         const awayTeam = item.awayTeam || item.away_team || "Away Team";
         const rawStatus = item.status || 'FINISHED';
 
+        const converted = convertUtcToWat(item.date || getTodayDateString(), item.time || "");
+
         return {
           id:            String(item.id || item.match_id || `result-${idx}`),
           homeTeam,
@@ -1141,8 +1184,8 @@ export default function App() {
           minute:        item.minute ? Number(item.minute) : undefined,
           group:         item.group  || item.stage || "Group Stage",
           stadium:       item.venue  || item.stadium || "FIFA World Cup Stadium",
-          date:          item.date   || getTodayDateString(),
-          time:          item.time   || "",
+          date:          converted.date,
+          time:          converted.time,
           stage:         item.stage  || "Group Stage",
           events:        Array.isArray(item.events) ? item.events : []
         };
@@ -2034,7 +2077,7 @@ export default function App() {
                                               >
                                                 <div className="flex items-center justify-between text-[10px] font-mono text-brand-text-secondary">
                                                   <span>
-                                                    {pred.matchDate ? new Date(pred.matchDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Tournament Match'}
+                                                    {pred.matchDate ? formatDateShort(pred.matchDate) : 'Tournament Match'}
                                                   </span>
                                                   
                                                   {isExact && (
