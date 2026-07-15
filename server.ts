@@ -1270,6 +1270,32 @@ async function startServer() {
     });
   }
 
+  async function generateContentWithFallback(aiClient: any, options: { model: string; contents: string; config?: any }) {
+    const modelsToTry = [options.model, "gemini-3.1-flash-lite", "gemini-flash-latest"];
+    let lastError: any = null;
+
+    for (const model of modelsToTry) {
+      let attempts = 2;
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+          console.log(`[Gemini API] Requesting via ${model} (attempt ${attempt}/${attempts})`);
+          const response = await aiClient.models.generateContent({
+            ...options,
+            model,
+          });
+          return response;
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`[Gemini API] Model ${model} attempt ${attempt} failed: ${err.message || err}`);
+          if (attempt < attempts) {
+            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+          }
+        }
+      }
+    }
+    throw lastError || new Error("All models and retries failed");
+  }
+
   function getHashCode(str: string): number {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -1585,7 +1611,7 @@ async function startServer() {
 Analyze their strengths, weaknesses, likely tactical setups, and recent historical form.
 Return the analysis in JSON format conforming exactly to the response schema. Ensure the percentages in match_winner sum to 100, and percentages in first_half sum to 100.`;
 
-      const response = await aiClient.models.generateContent({
+      const response = await generateContentWithFallback(aiClient, {
         model: "gemini-3.5-flash",
         contents: prompt,
         config: {
@@ -1673,7 +1699,7 @@ Return the analysis in JSON format conforming exactly to the response schema. En
 Analyze the match using historical head-to-head records and current player forms.
 Return the analysis in JSON format conforming exactly to the response schema. Ensure all win/draw/away_win percentage sets sum to 100.`;
 
-      const response = await aiClient.models.generateContent({
+      const response = await generateContentWithFallback(aiClient, {
         model: "gemini-3.5-flash",
         contents: prompt,
         config: {
